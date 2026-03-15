@@ -1,0 +1,14 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+
+[security]
+enabled = false
+
+[scan]
+default_music_dir = ""
+music_extensions = ["mp3", "flac", "ogg", "opus", "m4a", "mp4", "aac", "wma", "ape", "wav", "aiff"]
+
+[filename]
+delimiter = " - "
+special_char_map = {}
