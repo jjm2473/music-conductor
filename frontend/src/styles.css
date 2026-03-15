@@ -126,6 +126,54 @@ button:disabled {
   gap: 10px;
 }
 
+.keyword-input-wrap {
+  position: relative;
+}
+
+.keyword-input-wrap input {
+  padding-right: 84px;
+}
+
+.keyword-mode-switches {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 6px;
+}
+
+.keyword-mode-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.keyword-mode-btn .iconfont {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.keyword-mode-btn:hover {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, white);
+}
+
+.keyword-mode-btn.is-active {
+  color: var(--accent);
+}
+
+.filter-error {
+  margin: 8px 0 0;
+  color: #8a143a;
+  font-size: 12px;
+}
+
 .selection-actions {
   margin-top: 10px;
   display: flex;
@@ -165,6 +213,20 @@ button:disabled {
 .selection-actions button {
   padding: 8px 12px;
   font-size: 13px;
+}
+
+.icon-only-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-only-btn .iconfont {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .result-meta {
@@ -270,10 +332,9 @@ th {
 
 .sort-indicator {
   display: inline-block;
-  width: 1ch;
+  width: 1em;
   text-align: center;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -284,6 +345,11 @@ th {
 .meta-inline-button {
   padding: 6px 10px;
   font-size: 12px;
+}
+
+.meta-inline-button.icon-only-btn {
+  width: 30px;
+  height: 30px;
 }
 
 .ops-panel,
@@ -323,6 +389,30 @@ th {
   align-items: center;
   gap: 8px;
   color: var(--ink);
+}
+
+.special-char-map-editor {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.special-char-map-list {
+  display: grid;
+  gap: 8px;
+}
+
+.special-char-map-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ops-secondary-btn {
+  width: fit-content;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .ops-actions {
@@ -466,6 +556,12 @@ th {
   font-size: 12px;
   min-width: 104px;
   box-shadow: 0 8px 20px #13203a2b;
+}
+
+.scroll-shortcut.icon-only-btn {
+  min-width: 0;
+  width: 40px;
+  height: 40px;
 }
 
 .task-overlay,
@@ -628,6 +724,10 @@ tbody tr:focus {
 
   .toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .keyword-input-wrap input {
+    padding-right: 84px;
   }
 
   .time-filter-head {

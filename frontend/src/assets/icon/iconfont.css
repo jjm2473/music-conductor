@@ -1,0 +1,147 @@
+@font-face {
+  font-family: "iconfont"; /* Project id 5139507 */
+  src: url('iconfont.woff2?t=1773578039074') format('woff2'),
+       url('iconfont.woff?t=1773578039074') format('woff'),
+       url('iconfont.ttf?t=1773578039074') format('truetype');
+}
+
+.iconfont {
+  font-family: "iconfont" !important;
+  font-size: 16px;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.icon-replace-all:before {
+  content: "\ed7c";
+}
+
+.icon-swap-obj-fill:before {
+  content: "\ea52";
+}
+
+.icon-swap-bw:before {
+  content: "\e6de";
+}
+
+.icon-swap-ab:before {
+  content: "\e8b3";
+}
+
+.icon-swap:before {
+  content: "\e6d2";
+}
+
+.icon-cn-zh:before {
+  content: "\e8d2";
+}
+
+.icon-en:before {
+  content: "\e8d3";
+}
+
+.icon-global:before {
+  content: "\e652";
+}
+
+.icon-round_close:before {
+  content: "\e636";
+}
+
+.icon-search:before {
+  content: "\e630";
+}
+
+.icon-search-folder:before {
+  content: "\e787";
+}
+
+.icon-icon-ques:before {
+  content: "\e605";
+}
+
+.icon-fold:before {
+  content: "\e617";
+}
+
+.icon-info:before {
+  content: "\e618";
+}
+
+.icon-calendar:before {
+  content: "\e61f";
+}
+
+.icon-copy:before {
+  content: "\e620";
+}
+
+.icon-down:before {
+  content: "\e623";
+}
+
+.icon-close:before {
+  content: "\e627";
+}
+
+.icon-check:before {
+  content: "\e628";
+}
+
+.icon-edit:before {
+  content: "\e629";
+}
+
+.icon-unfold:before {
+  content: "\e62a";
+}
+
+.icon-warn:before {
+  content: "\e62b";
+}
+
+.icon-time:before {
+  content: "\e62c";
+}
+
+.icon-notification:before {
+  content: "\e62d";
+}
+
+.icon-filter:before {
+  content: "\e62e";
+}
+
+.icon-delete:before {
+  content: "\e62f";
+}
+
+.icon-scan:before {
+  content: "\e631";
+}
+
+.icon-top1:before {
+  content: "\e632";
+}
+
+.icon-home:before {
+  content: "\e633";
+}
+
+.icon-refresh:before {
+  content: "\e634";
+}
+
+.icon-pic:before {
+  content: "\e635";
+}
+
+.icon-regexp:before {
+  content: "\e61b";
+}
+
+.icon-case-sensitive:before {
+  content: "\e695";
+}
+

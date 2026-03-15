@@ -112,7 +112,8 @@ type OperationType =
   | "special_char_replace"
   | "metadata_fill_from_filename"
   | "rename_from_metadata"
-  | "metadata_cleanup";
+  | "metadata_cleanup_text"
+  | "metadata_cleanup_remove_fields";
 
 type SortKey =
   | "file_name"
@@ -126,6 +127,12 @@ type SortKey =
 type SortState = {
   key: SortKey;
   order: "asc" | "desc";
+};
+
+type SpecialCharMapRow = {
+  id: string;
+  from: string;
+  to: string;
 };
 
 const getDefaultSortOrder = (key: SortKey): SortState["order"] => {
@@ -144,7 +151,7 @@ type SortHeaderButtonProps = {
 
 function SortHeaderButton({ label, sortKey, sort, onSort }: SortHeaderButtonProps) {
   const isActive = sort.key === sortKey;
-  const indicator = sort.order === "asc" ? "+" : "-";
+  const indicator = sort.order === "asc" ? "icon-unfold" : "icon-fold";
 
   return (
     <button
@@ -154,10 +161,9 @@ function SortHeaderButton({ label, sortKey, sort, onSort }: SortHeaderButtonProp
     >
       <span>{label}</span>
       <span
-        className={`sort-indicator${isActive ? "" : " is-placeholder"}`}
-        aria-hidden={!isActive}
+        className={`sort-indicator iconfont ${isActive ? indicator : "icon-unfold"}${isActive ? "" : " is-placeholder"}`}
+        aria-hidden="true"
       >
-        {isActive ? indicator : "+"}
       </span>
     </button>
   );
@@ -453,6 +459,8 @@ function InlineAudioPreview({ playerId, sourceUrl }: InlineAudioPreviewProps) {
 export default function App() {
   const [directory, setDirectory] = useState("");
   const [keyword, setKeyword] = useState("");
+  const [keywordCaseSensitive, setKeywordCaseSensitive] = useState(false);
+  const [keywordUseRegex, setKeywordUseRegex] = useState(false);
   const [timeFilter, setTimeFilter] = useState<TimeFilterValue>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -468,9 +476,14 @@ export default function App() {
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   const [operationType, setOperationType] = useState<OperationType>("swap_name_parts");
+  const specialCharRowSeed = useRef(1);
+  const [specialCharMapRows, setSpecialCharMapRows] = useState<SpecialCharMapRow[]>([
+    { id: "special-char-row-1", from: "", to: "" },
+  ]);
   const [fillMode, setFillMode] = useState<"artist_title" | "title_artist">("artist_title");
   const [cleanupPattern, setCleanupPattern] = useState("");
   const [cleanupUseRegex, setCleanupUseRegex] = useState(false);
+  const [cleanupCaseSensitive, setCleanupCaseSensitive] = useState(false);
   const [cleanupFieldsInput, setCleanupFieldsInput] = useState("title,artist,album");
   const [removeFieldsInput, setRemoveFieldsInput] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -498,28 +511,62 @@ export default function App() {
   const [metadataRemoveFieldsInput, setMetadataRemoveFieldsInput] = useState("");
   const [showGlobalScrollActions, setShowGlobalScrollActions] = useState(false);
 
+  const keywordRegexError = useMemo(() => {
+    const trimmed = keyword.trim();
+    if (!keywordUseRegex || trimmed.length === 0) {
+      return null;
+    }
+
+    try {
+      void new RegExp(trimmed, keywordCaseSensitive ? "" : "i");
+      return null;
+    } catch {
+      return "正则表达式无效";
+    }
+  }, [keyword, keywordUseRegex, keywordCaseSensitive]);
+
   const sortedFiles = useMemo(() => {
     const files = response?.files ?? [];
-    const normalizedKeyword = keyword.trim().toLowerCase();
+    const trimmedKeyword = keyword.trim();
     const thresholdOption = getTimeFilterOption(timeFilter);
     const threshold =
       thresholdOption.ms === Number.POSITIVE_INFINITY ? -Number.POSITIVE_INFINITY : Date.now() - thresholdOption.ms;
-    const filtered = normalizedKeyword
-      ? files.filter((file) => {
-          const haystack = [
-            file.file_name,
-            file.metadata.title ?? "",
-            file.metadata.artist ?? "",
-            file.metadata.album ?? "",
-          ]
-            .join(" ")
-            .toLowerCase();
-          if (!haystack.includes(normalizedKeyword)) {
-            return false;
-          }
-          return Date.parse(file.modified_at) >= threshold;
-        })
-      : files.filter((file) => Date.parse(file.modified_at) >= threshold);
+    let keywordMatcher: ((value: string) => boolean) | null = null;
+
+    if (trimmedKeyword.length > 0) {
+      if (keywordUseRegex) {
+        if (keywordRegexError) {
+          keywordMatcher = () => false;
+        } else {
+          const regex = new RegExp(trimmedKeyword, keywordCaseSensitive ? "" : "i");
+          keywordMatcher = (value) => regex.test(value);
+        }
+      } else {
+        const expected = keywordCaseSensitive ? trimmedKeyword : trimmedKeyword.toLowerCase();
+        keywordMatcher = (value) => {
+          const source = keywordCaseSensitive ? value : value.toLowerCase();
+          return source.includes(expected);
+        };
+      }
+    }
+
+    const filtered = files.filter((file) => {
+      if (Date.parse(file.modified_at) < threshold) {
+        return false;
+      }
+
+      if (!keywordMatcher) {
+        return true;
+      }
+
+      const haystack = [
+        file.file_name,
+        file.metadata.title ?? "",
+        file.metadata.artist ?? "",
+        file.metadata.album ?? "",
+      ].join(" ");
+      return keywordMatcher(haystack);
+    });
 
     return [...filtered].sort((a, b) => {
       const factor = sort.order === "asc" ? 1 : -1;
@@ -547,7 +594,7 @@ export default function App() {
       }
       return (Date.parse(a.modified_at) - Date.parse(b.modified_at)) * factor;
     });
-  }, [response, keyword, sort, timeFilter]);
+  }, [response, keyword, sort, timeFilter, keywordCaseSensitive, keywordUseRegex, keywordRegexError]);
 
   const fileNameToIndexMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -694,6 +741,53 @@ export default function App() {
       }
       return { key, order: getDefaultSortOrder(key) };
     });
+  };
+
+  const updateSpecialCharMapRow = (rowId: string, field: "from" | "to", value: string) => {
+    setSpecialCharMapRows((previous) =>
+      previous.map((row) => (row.id === rowId ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const addSpecialCharMapRow = () => {
+    specialCharRowSeed.current += 1;
+    setSpecialCharMapRows((previous) => [
+      ...previous,
+      {
+        id: `special-char-row-${specialCharRowSeed.current}`,
+        from: "",
+        to: "",
+      },
+    ]);
+  };
+
+  const removeSpecialCharMapRow = (rowId: string) => {
+    setSpecialCharMapRows((previous) => {
+      if (previous.length <= 1) {
+        return previous.map((row) =>
+          row.id === rowId
+            ? {
+                ...row,
+                from: "",
+                to: "",
+              }
+            : row
+        );
+      }
+
+      return previous.filter((row) => row.id !== rowId);
+    });
+  };
+
+  const buildSpecialCharMap = (): Record<string, string> => {
+    const mapping: Record<string, string> = {};
+    for (const row of specialCharMapRows) {
+      if (!row.from) {
+        continue;
+      }
+      mapping[row.from] = row.to;
+    }
+    return mapping;
   };
 
   const runScan = async (
@@ -928,14 +1022,25 @@ export default function App() {
       selected_files: selectedFiles.length > 0 ? selectedFiles : undefined,
     };
 
+    if (operationType === "special_char_replace") {
+      const specialCharMap = buildSpecialCharMap();
+      if (Object.keys(specialCharMap).length > 0) {
+        payload.special_char_map = specialCharMap;
+      }
+    }
+
     if (operationType === "metadata_fill_from_filename" || operationType === "rename_from_metadata") {
       payload.fill_mode = fillMode;
     }
 
-    if (operationType === "metadata_cleanup") {
+    if (operationType === "metadata_cleanup_text") {
       payload.cleanup_pattern = cleanupPattern || null;
       payload.cleanup_use_regex = cleanupUseRegex;
+      payload.cleanup_case_sensitive = cleanupCaseSensitive;
       payload.cleanup_fields = parseCsv(cleanupFieldsInput);
+    }
+
+    if (operationType === "metadata_cleanup_remove_fields") {
       payload.remove_fields = parseCsv(removeFieldsInput);
     }
 
@@ -948,11 +1053,24 @@ export default function App() {
       return;
     }
 
-	setOperationError(null);
-	setOperationResult(null);
+    setOperationError(null);
+    setOperationResult(null);
+
+    if (operationType === "metadata_cleanup_text" && !cleanupPattern.trim()) {
+      setOperationError("请填写待清理文本。");
+      setOperationPreview(null);
+      return;
+    }
+
+    if (operationType === "metadata_cleanup_remove_fields" && parseCsv(removeFieldsInput).length === 0) {
+      setOperationError("请至少填写一个待删除字段。");
+      setOperationPreview(null);
+      return;
+    }
 
     if (selectedFiles.length === 0) {
-	  setOperationPreview(null);
+      setOperationError("请先选择至少一个文件。");
+      setOperationPreview(null);
       return;
     }
 
@@ -1324,19 +1442,48 @@ export default function App() {
               value={directory}
               onChange={(event) => setDirectory(event.target.value)}
             />
-            <button onClick={() => runScan()} disabled={loading || taskRunning}>
-              {loading ? "扫描中..." : "开始扫描"}
+            <button onClick={() => runScan()} disabled={loading || taskRunning}
+				aria-label={loading ? '扫描中...' : '开始扫描'}
+				title={loading ? '扫描中...' : '开始扫描'}
+            >
+              <span className="iconfont icon-search-folder" aria-hidden="true" />
             </button>
           </div>
 
           <div className="toolbar">
-            <input
-              type="text"
-              placeholder="筛选文件名/歌曲名/艺术家/专辑"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              disabled={!response || taskRunning}
-            />
+            <div className="keyword-input-wrap">
+              <input
+                type="text"
+                placeholder="筛选文件名/歌曲名/艺术家/专辑"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                disabled={!response || taskRunning}
+              />
+              <div className="keyword-mode-switches" aria-label="文本筛选模式">
+                <button
+                  type="button"
+                  className={`keyword-mode-btn${keywordCaseSensitive ? " is-active" : ""}`}
+                  onClick={() => setKeywordCaseSensitive((previous) => !previous)}
+                  disabled={!response || taskRunning}
+                  aria-label="大小写敏感筛选"
+                  aria-pressed={keywordCaseSensitive}
+                  title={keywordCaseSensitive ? "大小写敏感：开启" : "大小写敏感：关闭"}
+                >
+                  <span className="iconfont icon-case-sensitive" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className={`keyword-mode-btn${keywordUseRegex ? " is-active" : ""}`}
+                  onClick={() => setKeywordUseRegex((previous) => !previous)}
+                  disabled={!response || taskRunning}
+                  aria-label="正则表达式筛选"
+                  aria-pressed={keywordUseRegex}
+                  title={keywordUseRegex ? "正则表达式：开启" : "正则表达式：关闭"}
+                >
+                  <span className="iconfont icon-regexp" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
             {response ? (
               <p className="result-meta">
                 目录: {response.directory} | 扫描到 {response.total_files} 首
@@ -1345,6 +1492,8 @@ export default function App() {
               <p className="result-meta">等待扫描...</p>
             )}
           </div>
+
+          {keywordRegexError ? <p className="filter-error">{keywordRegexError}</p> : null}
 
           <div className="time-filter" aria-label="最近修改时间筛选">
             <div className="time-filter-head">
@@ -1374,9 +1523,36 @@ export default function App() {
           </div>
 
           <div className="selection-actions">
-            <button type="button" onClick={selectAllFiltered} disabled={!response || taskRunning}>全选</button>
-            <button type="button" onClick={invertFiltered} disabled={!response || taskRunning}>反选</button>
-            <button type="button" onClick={clearSelection} disabled={!response || taskRunning}>全部取消选择</button>
+            <button
+              type="button"
+              className="icon-only-btn"
+              onClick={selectAllFiltered}
+              disabled={!response || taskRunning}
+              aria-label="全选"
+              title="全选"
+            >
+              <span className="iconfont icon-check" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-only-btn"
+              onClick={invertFiltered}
+              disabled={!response || taskRunning}
+              aria-label="反选"
+              title="反选"
+            >
+              <span className="iconfont icon-swap-bw" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-only-btn"
+              onClick={clearSelection}
+              disabled={!response || taskRunning}
+              aria-label="全部取消选择"
+              title="全部取消选择"
+            >
+              <span className="iconfont icon-close" aria-hidden="true" />
+            </button>
           </div>
 
           <div className="table-wrap manager-table-wrap" onPointerLeave={() => setDragSelecting(false)}>
@@ -1387,22 +1563,22 @@ export default function App() {
                   <th>
                     <SortHeaderButton label="文件名" sortKey="file_name" sort={sort} onSort={onSort} />
                   </th>
-                  <th style={{width: '5em'}}>
+                  <th style={{width: '6em'}}>
                     <SortHeaderButton label="大小" sortKey="size_bytes" sort={sort} onSort={onSort} />
                   </th>
                   <th>
                     <SortHeaderButton label="修改时间" sortKey="modified_at" sort={sort} onSort={onSort} />
                   </th>
-                  <th style={{width: '5em'}}>
+                  <th style={{width: '6em'}}>
                     <SortHeaderButton label="时长" sortKey="duration_seconds" sort={sort} onSort={onSort} />
                   </th>
-                  <th style={{width: '5em'}}>
+                  <th style={{width: '6em'}}>
                     <SortHeaderButton label="标题" sortKey="title" sort={sort} onSort={onSort} />
                   </th>
                   <th>
                     <SortHeaderButton label="艺术家" sortKey="artist" sort={sort} onSort={onSort} />
                   </th>
-                  <th style={{width: '5em'}}>
+                  <th style={{width: '6em'}}>
                     <SortHeaderButton label="专辑" sortKey="album" sort={sort} onSort={onSort} />
                   </th>
                   <th style={{width: '5em'}}>元数据</th>
@@ -1468,11 +1644,13 @@ export default function App() {
                       <td>
                         <button
                           type="button"
-                          className="meta-inline-button"
+                          className="meta-inline-button icon-only-btn"
                           onClick={() => openMetadataEditor(file)}
                           disabled={taskRunning}
+                          aria-label={`编辑 ${file.file_name} 的元数据`}
+                          title="编辑元数据"
                         >
-                          编辑
+                          <span className="iconfont icon-edit" aria-hidden="true" />
                         </button>
                       </td>
                     </tr>
@@ -1496,13 +1674,61 @@ export default function App() {
                   onChange={(event) => setOperationType(event.target.value as OperationType)}
                   disabled={taskRunning}
                 >
-                  <option value="swap_name_parts">A-B 与 B-A 互换重命名</option>
+                  <option value="swap_name_parts">文件名 A-B 与 B-A 风格互换</option>
                   <option value="special_char_replace">特殊字符替换重命名</option>
                   <option value="metadata_fill_from_filename">根据文件名填充元数据</option>
                   <option value="rename_from_metadata">根据元数据修改文件名</option>
-                  <option value="metadata_cleanup">清理元数据</option>
+                  <option value="metadata_cleanup_text">清理元数据文本（支持正则/大小写）</option>
+                  <option value="metadata_cleanup_remove_fields">删除元数据字段</option>
                 </select>
               </label>
+
+              {operationType === "special_char_replace" ? (
+                <div className="special-char-map-editor">
+                  <p className="result-meta">
+                    可选：自定义映射表（留空则使用后端默认映射；填写后将覆盖默认映射）。
+                  </p>
+
+                  <div className="special-char-map-list" role="group" aria-label="特殊字符映射表">
+                    {specialCharMapRows.map((row, index) => (
+                      <div className="special-char-map-row" key={row.id}>
+                        <input
+                          value={row.from}
+                          onChange={(event) => updateSpecialCharMapRow(row.id, "from", event.target.value)}
+                          placeholder="源字符，例如 _"
+                          disabled={taskRunning}
+                          aria-label={`映射 ${index + 1} 的源字符`}
+                        />
+                        <input
+                          value={row.to}
+                          onChange={(event) => updateSpecialCharMapRow(row.id, "to", event.target.value)}
+                          placeholder="目标字符，例如 空格"
+                          disabled={taskRunning}
+                          aria-label={`映射 ${index + 1} 的目标字符`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeSpecialCharMapRow(row.id)}
+                          disabled={taskRunning}
+                          aria-label={`删除映射 ${index + 1}`}
+                          title="删除映射"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="ops-secondary-btn"
+                    onClick={addSpecialCharMapRow}
+                    disabled={taskRunning}
+                  >
+                    新增映射
+                  </button>
+                </div>
+              ) : null}
 
               {operationType === "metadata_fill_from_filename" || operationType === "rename_from_metadata" ? (
                 <label>
@@ -1518,7 +1744,7 @@ export default function App() {
                 </label>
               ) : null}
 
-              {operationType === "metadata_cleanup" ? (
+              {operationType === "metadata_cleanup_text" ? (
                 <>
                   <label>
                     清理字段（逗号分隔）
@@ -1538,15 +1764,6 @@ export default function App() {
                       disabled={taskRunning}
                     />
                   </label>
-                  <label>
-                    删除字段（逗号分隔）
-                    <input
-                      value={removeFieldsInput}
-                      onChange={(event) => setRemoveFieldsInput(event.target.value)}
-                      placeholder="例如 album"
-                      disabled={taskRunning}
-                    />
-                  </label>
                   <label className="checkbox-label">
                     <input
                       type="checkbox"
@@ -1556,7 +1773,28 @@ export default function App() {
                     />
                     使用正则
                   </label>
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={cleanupCaseSensitive}
+                      onChange={(event) => setCleanupCaseSensitive(event.target.checked)}
+                      disabled={taskRunning}
+                    />
+                    大小写敏感
+                  </label>
                 </>
+              ) : null}
+
+              {operationType === "metadata_cleanup_remove_fields" ? (
+                <label>
+                  删除字段（逗号分隔）
+                  <input
+                    value={removeFieldsInput}
+                    onChange={(event) => setRemoveFieldsInput(event.target.value)}
+                    placeholder="例如 album,comment,lyrics"
+                    disabled={taskRunning}
+                  />
+                </label>
               ) : null}
             </div>
 
@@ -1769,11 +2007,23 @@ export default function App() {
 
       {showGlobalScrollActions ? (
         <div className="global-scroll-actions" aria-label="页面滚动快捷操作">
-          <button type="button" className="scroll-shortcut" onClick={scrollToTop}>
-            回到顶部
+          <button
+            type="button"
+            className="scroll-shortcut icon-only-btn"
+            onClick={scrollToTop}
+            aria-label="回到顶部"
+            title="回到顶部"
+          >
+            <span className="iconfont icon-top1" aria-hidden="true" />
           </button>
-          <button type="button" className="scroll-shortcut" onClick={scrollToBottom}>
-            滚到底部
+          <button
+            type="button"
+            className="scroll-shortcut icon-only-btn"
+            onClick={scrollToBottom}
+            aria-label="滚到底部"
+            title="滚到底部"
+          >
+            <span className="iconfont icon-down" aria-hidden="true" />
           </button>
         </div>
       ) : null}

@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.app.config import AppConfig
-from backend.app.models import OperationPreviewRequest
-from backend.app.operations import build_operation_preview, execute_operation
+from app.config import AppConfig
+from app.models import OperationPreviewRequest
+from app.operations import build_operation_preview, execute_operation
 
 
 class OperationFlowTests(unittest.TestCase):
@@ -60,6 +60,46 @@ class OperationFlowTests(unittest.TestCase):
         self.assertEqual(result.executed, [])
         self.assertGreaterEqual(len(result.failed), 1)
 
+    def test_special_char_preview_uses_request_override_map(self) -> None:
+        (self.directory / "A_B.mp3").write_bytes(b"ID3")
+
+        config = AppConfig(
+            default_music_dir=str(self.directory),
+            special_char_map={"_": " "},
+        )
+
+        preview = build_operation_preview(
+            OperationPreviewRequest(
+                directory=str(self.directory),
+                operation="special_char_replace",
+                special_char_map={"_": "-"},
+            ),
+            config,
+        )
+
+        self.assertEqual(len(preview.items), 1)
+        self.assertEqual(preview.items[0].destination_file, "A-B.mp3")
+
+    def test_special_char_preview_supports_ampersand_to_ideographic_comma(self) -> None:
+        (self.directory / "A&B.mp3").write_bytes(b"ID3")
+
+        config = AppConfig(
+            default_music_dir=str(self.directory),
+            special_char_map={"&": "、"},
+        )
+
+        preview = build_operation_preview(
+            OperationPreviewRequest(
+                directory=str(self.directory),
+                operation="special_char_replace",
+            ),
+            config,
+        )
+
+        self.assertEqual(len(preview.items), 1)
+        self.assertEqual(preview.items[0].source_file, "A&B.mp3")
+        self.assertEqual(preview.items[0].destination_file, "A、B.mp3")
+
     def test_execute_swap_renames_music_and_lrc(self) -> None:
         source_music = self.directory / "A - B.mp3"
         source_lrc = self.directory / "A - B.lrc"
@@ -85,7 +125,7 @@ class OperationFlowTests(unittest.TestCase):
         self.assertTrue((self.directory / "B - A.mp3").exists())
         self.assertTrue((self.directory / "B - A.lrc").exists())
 
-    @patch("backend.app.operations.read_easy_metadata")
+    @patch("app.operations.read_easy_metadata")
     def test_metadata_rename_preview_skips_unchanged_and_reports_missing(
         self,
         mock_read_easy_metadata,
@@ -132,7 +172,7 @@ class OperationFlowTests(unittest.TestCase):
         self.assertEqual(lrc_item.destination_file, "Artist A - Song A.lrc")
         self.assertFalse(any(item.source_file == "Artist C - Song C.mp3" for item in preview.items))
 
-    @patch("backend.app.operations.read_easy_metadata")
+    @patch("app.operations.read_easy_metadata")
     def test_metadata_rename_preview_supports_title_artist_mode(self, mock_read_easy_metadata) -> None:
         (self.directory / "input.mp3").write_bytes(b"ID3")
         mock_read_easy_metadata.return_value = ({"artist": "Artist X", "title": "Song X", "album": ""}, None)
@@ -150,6 +190,80 @@ class OperationFlowTests(unittest.TestCase):
         self.assertEqual(len(preview.warnings), 0)
         self.assertEqual(len(preview.items), 1)
         self.assertEqual(preview.items[0].destination_file, "Song X - Artist X.mp3")
+
+    @patch("app.operations.read_easy_metadata")
+    def test_metadata_cleanup_text_supports_case_sensitive(self, mock_read_easy_metadata) -> None:
+        (self.directory / "cleanup.mp3").write_bytes(b"ID3")
+        mock_read_easy_metadata.return_value = (
+            {
+                "title": "feat. Song",
+                "artist": "Feat. Artist",
+                "album": "Demo",
+            },
+            None,
+        )
+
+        config = AppConfig(default_music_dir=str(self.directory))
+        preview = build_operation_preview(
+            OperationPreviewRequest(
+                directory=str(self.directory),
+                operation="metadata_cleanup_text",
+                cleanup_pattern="feat.",
+                cleanup_use_regex=False,
+                cleanup_case_sensitive=True,
+                cleanup_fields=["title", "artist"],
+            ),
+            config,
+        )
+
+        self.assertEqual(len(preview.items), 1)
+        changes = {change.field: change.new_value for change in preview.items[0].metadata_changes}
+        self.assertEqual(changes.get("title"), "Song")
+        self.assertNotIn("artist", changes)
+
+    @patch("app.operations.read_easy_metadata")
+    def test_metadata_cleanup_remove_fields_deletes_requested_fields(self, mock_read_easy_metadata) -> None:
+        (self.directory / "remove.mp3").write_bytes(b"ID3")
+        mock_read_easy_metadata.return_value = (
+            {
+                "title": "Song",
+                "artist": "Artist",
+                "album": "Album",
+                "comment": "",
+            },
+            None,
+        )
+
+        config = AppConfig(default_music_dir=str(self.directory))
+        preview = build_operation_preview(
+            OperationPreviewRequest(
+                directory=str(self.directory),
+                operation="metadata_cleanup_remove_fields",
+                remove_fields=["artist", "album", "comment"],
+            ),
+            config,
+        )
+
+        self.assertEqual(len(preview.items), 1)
+        removed_fields = {
+            change.field
+            for change in preview.items[0].metadata_changes
+            if change.new_value is None
+        }
+        self.assertEqual(removed_fields, {"artist", "album"})
+
+    def test_metadata_cleanup_remove_fields_requires_input(self) -> None:
+        config = AppConfig(default_music_dir=str(self.directory))
+
+        with self.assertRaisesRegex(ValueError, "请至少提供一个待删除字段"):
+            build_operation_preview(
+                OperationPreviewRequest(
+                    directory=str(self.directory),
+                    operation="metadata_cleanup_remove_fields",
+                    remove_fields=[],
+                ),
+                config,
+            )
 
 
 if __name__ == "__main__":

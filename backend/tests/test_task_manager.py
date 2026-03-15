@@ -4,8 +4,8 @@ import json
 import time
 import unittest
 
-from backend.app.models import ScanErrorItem
-from backend.app.task_manager import TaskManager
+from app.models import ScanErrorItem
+from app.task_manager import TaskManager
 
 
 def _wait_terminal_state(manager: TaskManager, task_id: str, timeout: float = 2.0):

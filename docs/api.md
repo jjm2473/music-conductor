@@ -119,13 +119,20 @@ Shared request body:
 - `special_char_replace`
 - `metadata_fill_from_filename`
 - `rename_from_metadata`
-- `metadata_cleanup`
+- `metadata_cleanup_text`
+- `metadata_cleanup_remove_fields`
+
+Compatibility:
+
+- `metadata_cleanup` remains accepted as a legacy combined mode.
 
 Extra fields by operation:
 
+- Special char replace: `special_char_map` (optional override map)
 - Fill from filename: `fill_mode` = `artist_title` | `title_artist`
 - Rename from metadata: `fill_mode` = `artist_title` | `title_artist`
-- Cleanup: `cleanup_pattern`, `cleanup_use_regex`, `cleanup_fields`, `remove_fields`
+- Metadata text cleanup: `cleanup_pattern`, `cleanup_use_regex`, `cleanup_case_sensitive`, `cleanup_fields`
+- Metadata field removal: `remove_fields`
 
 Preview response notes:
 

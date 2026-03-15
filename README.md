@@ -69,8 +69,17 @@ Optional frontend env:
 
 ### 3) Backend Tests
 
+Run from repository root:
+
 ```bash
-backend/.venv/bin/python -m unittest discover -s backend/tests -v
+cd /path/to/music-conductor
+PYTHONPATH=backend backend/.venv/bin/python -m unittest discover -s backend/tests -v
+```
+
+If you are already in `backend/`, use:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 ### 4) Frontend Tests

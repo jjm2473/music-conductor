@@ -305,18 +305,16 @@ def _build_metadata_rename_preview(
     return items, warnings
 
 
-def _build_metadata_cleanup_preview(
+def _build_metadata_text_cleanup_preview(
     entries: list[Path],
-    pattern: str | None,
+    pattern: str,
     use_regex: bool,
+    case_sensitive: bool,
     cleanup_fields: list[str],
-    remove_fields: set[str],
 ) -> list[OperationPlanItem]:
     items: list[OperationPlanItem] = []
 
-    regex = None
-    if use_regex and pattern:
-        regex = re.compile(pattern)
+    regex = re.compile(pattern, 0 if case_sensitive else re.IGNORECASE) if use_regex else None
 
     for entry in entries:
         current, _ = read_easy_metadata(entry)
@@ -324,25 +322,14 @@ def _build_metadata_cleanup_preview(
 
         for field in cleanup_fields:
             old_value = current.get(field, "")
-            new_value = old_value
+            if regex:
+                new_value = regex.sub("", old_value)
+            elif case_sensitive:
+                new_value = old_value.replace(pattern, "")
+            else:
+                new_value = re.sub(re.escape(pattern), "", old_value, flags=re.IGNORECASE)
 
-            if pattern:
-                if regex:
-                    new_value = regex.sub("", new_value)
-                else:
-                    new_value = new_value.replace(pattern, "")
-                new_value = new_value.strip()
-
-            if field in remove_fields:
-                if old_value:
-                    changes.append(
-                        MetadataChangeItem(
-                            field=field,
-                            old_value=old_value,
-                            new_value=None,
-                        )
-                    )
-                continue
+            new_value = new_value.strip()
 
             if new_value != old_value:
                 changes.append(
@@ -363,11 +350,78 @@ def _build_metadata_cleanup_preview(
                 target_type="music",
                 source_file=entry.name,
                 metadata_changes=changes,
-                reason="批量清理元数据",
+                reason="批量清理元数据文本",
             )
         )
 
     return items
+
+
+def _build_metadata_remove_fields_preview(
+    entries: list[Path],
+    remove_fields: set[str],
+) -> list[OperationPlanItem]:
+    items: list[OperationPlanItem] = []
+
+    for entry in entries:
+        current, _ = read_easy_metadata(entry)
+        changes: list[MetadataChangeItem] = []
+
+        for field in remove_fields:
+            old_value = current.get(field, "")
+            if not old_value:
+                continue
+
+            changes.append(
+                MetadataChangeItem(
+                    field=field,
+                    old_value=old_value,
+                    new_value=None,
+                )
+            )
+
+        if not changes:
+            continue
+
+        items.append(
+            OperationPlanItem(
+                id="",
+                action="metadata_update",
+                target_type="music",
+                source_file=entry.name,
+                metadata_changes=changes,
+                reason="批量删除元数据字段",
+            )
+        )
+
+    return items
+
+
+def _merge_metadata_items(groups: list[list[OperationPlanItem]]) -> list[OperationPlanItem]:
+    merged: dict[str, OperationPlanItem] = {}
+
+    for items in groups:
+        for item in items:
+            source = item.source_file
+            if not source:
+                continue
+
+            existing = merged.get(source)
+            if existing is None:
+                merged[source] = item
+                continue
+
+            indexed_changes = {change.field: change for change in existing.metadata_changes}
+            for change in item.metadata_changes:
+                indexed_changes[change.field] = change
+
+            merged[source] = existing.model_copy(
+                update={
+                    "metadata_changes": list(indexed_changes.values()),
+                }
+            )
+
+    return list(merged.values())
 
 
 def build_operation_preview(payload: OperationPreviewRequest, config: AppConfig) -> OperationPreviewResponse:
@@ -381,23 +435,50 @@ def build_operation_preview(payload: OperationPreviewRequest, config: AppConfig)
     if payload.operation == "swap_name_parts":
         items = _build_swap_preview(entries, config.filename_delimiter)
     elif payload.operation == "special_char_replace":
-        items = _build_special_char_preview(entries, config.special_char_map)
+        char_map = payload.special_char_map if payload.special_char_map is not None else config.special_char_map
+        items = _build_special_char_preview(entries, char_map)
     elif payload.operation == "metadata_fill_from_filename":
         fill_mode = payload.fill_mode or "artist_title"
         items = _build_metadata_fill_preview(entries, config.filename_delimiter, fill_mode)
     elif payload.operation == "rename_from_metadata":
         fill_mode = payload.fill_mode or "artist_title"
         items, warnings = _build_metadata_rename_preview(entries, config.filename_delimiter, fill_mode)
-    else:
+    elif payload.operation == "metadata_cleanup_text":
+        cleanup_pattern = (payload.cleanup_pattern or "").strip()
+        if not cleanup_pattern:
+            raise ValueError("清理文本不能为空")
         cleanup_fields = payload.cleanup_fields or ["title", "artist", "album"]
-        remove_fields = set(payload.remove_fields or [])
-        items = _build_metadata_cleanup_preview(
+        if not cleanup_fields:
+            raise ValueError("清理字段不能为空")
+        items = _build_metadata_text_cleanup_preview(
             entries,
-            payload.cleanup_pattern,
+            cleanup_pattern,
             payload.cleanup_use_regex,
+            payload.cleanup_case_sensitive,
             cleanup_fields,
-            remove_fields,
         )
+    elif payload.operation == "metadata_cleanup_remove_fields":
+        remove_fields = {field for field in (payload.remove_fields or []) if field}
+        if not remove_fields:
+            raise ValueError("请至少提供一个待删除字段")
+        items = _build_metadata_remove_fields_preview(entries, remove_fields)
+    else:
+        # Backward compatible path for legacy metadata_cleanup.
+        cleanup_fields = payload.cleanup_fields or ["title", "artist", "album"]
+        remove_fields = {field for field in (payload.remove_fields or []) if field}
+        text_items: list[OperationPlanItem] = []
+        if payload.cleanup_pattern:
+            text_targets = [field for field in cleanup_fields if field not in remove_fields]
+            if text_targets:
+                text_items = _build_metadata_text_cleanup_preview(
+                    entries,
+                    payload.cleanup_pattern,
+                    payload.cleanup_use_regex,
+                    payload.cleanup_case_sensitive,
+                    text_targets,
+                )
+        remove_items = _build_metadata_remove_fields_preview(entries, remove_fields) if remove_fields else []
+        items = _merge_metadata_items([text_items, remove_items])
 
     items = _annotate_conflicts(items, directory)
     items = _reindex(items)

@@ -244,7 +244,94 @@ describe("App integration", () => {
     });
   });
 
-  it("supports metadata sorting columns and only shows +/- for active column", async () => {
+  it("supports case-sensitive and regex keyword filtering with in-input toggles", async () => {
+    const taskId = "task-007";
+    const scanResult = createScanResult();
+
+    let statusCallCount = 0;
+
+    createFetchMock([
+      ({ url, method }) => {
+        if (url.endsWith("/api/tasks/scan/start") && method === "POST") {
+          return {
+            body: { task_id: taskId, task_type: "scan" },
+          };
+        }
+        return null as never;
+      },
+      ({ url, method }) => {
+        if (url === getStatusUrl(taskId) && method === "GET") {
+          statusCallCount += 1;
+          if (statusCallCount === 1) {
+            return {
+              body: createTaskStatus({
+                task_id: taskId,
+                state: "running",
+                progress_percent: 6,
+                current_subtask: "准备扫描",
+                result: undefined,
+              }),
+            };
+          }
+
+          return {
+            body: createTaskStatus({
+              task_id: taskId,
+              state: "completed",
+              progress_percent: 100,
+              current_subtask: "扫描完成",
+              result: scanResult,
+            }),
+          };
+        }
+        return null as never;
+      },
+    ]);
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: startButtonText }));
+    await waitFor(() => {
+      expect(screen.getByText(/扫描到 3 首/)).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
+
+    const keywordInput = screen.getByPlaceholderText("筛选文件名/歌曲名/艺术家/专辑");
+    const caseSensitiveButton = screen.getByRole("button", { name: "大小写敏感筛选" });
+    const regexButton = screen.getByRole("button", { name: "正则表达式筛选" });
+
+    await userEvent.clear(keywordInput);
+    await userEvent.type(keywordInput, "song 1");
+    await waitFor(() => {
+      expect(screen.getByText("A - Song 1.mp3")).toBeInTheDocument();
+    });
+
+    await userEvent.click(caseSensitiveButton);
+    await waitFor(() => {
+      expect(screen.queryByText("A - Song 1.mp3")).not.toBeInTheDocument();
+      expect(screen.getByText("没有匹配结果")).toBeInTheDocument();
+    });
+
+    await userEvent.clear(keywordInput);
+    await userEvent.type(keywordInput, "Song\\s+1");
+    await waitFor(() => {
+      expect(screen.queryByText("A - Song 1.mp3")).not.toBeInTheDocument();
+    });
+
+    await userEvent.click(regexButton);
+    await waitFor(() => {
+      expect(screen.getByText("A - Song 1.mp3")).toBeInTheDocument();
+    });
+
+    await userEvent.clear(keywordInput);
+    await userEvent.type(keywordInput, "(");
+    await waitFor(() => {
+      expect(screen.getByText("正则表达式无效")).toBeInTheDocument();
+    });
+  });
+
+  it("supports metadata sorting columns and only marks active column indicator", async () => {
     const taskId = "task-005";
     const scanResult = createScanResult();
 
@@ -297,38 +384,47 @@ describe("App integration", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
 
-    expect(screen.getByRole("button", { name: "文件名" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "大小" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /修改时间\s*-/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "时长" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "标题" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "艺术家" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "专辑" })).toBeInTheDocument();
+    const fileNameSortButton = screen.getByRole("button", { name: "文件名" });
+    const sizeSortButton = screen.getByRole("button", { name: "大小" });
+    const modifiedAtSortButton = screen.getByRole("button", { name: "修改时间" });
+    const durationSortButton = screen.getByRole("button", { name: "时长" });
+    const titleSortButton = screen.getByRole("button", { name: "标题" });
+    const artistSortButton = screen.getByRole("button", { name: "艺术家" });
+    const albumSortButton = screen.getByRole("button", { name: "专辑" });
 
-    await userEvent.click(screen.getByRole("button", { name: "标题" }));
-    await userEvent.click(screen.getByRole("button", { name: /标题\s*\+/ }));
+    expect(fileNameSortButton).toBeInTheDocument();
+    expect(sizeSortButton).toBeInTheDocument();
+    expect(modifiedAtSortButton).toBeInTheDocument();
+    expect(durationSortButton).toBeInTheDocument();
+    expect(titleSortButton).toBeInTheDocument();
+    expect(artistSortButton).toBeInTheDocument();
+    expect(albumSortButton).toBeInTheDocument();
+    expect(modifiedAtSortButton).toHaveClass("is-active");
+
+    await userEvent.click(titleSortButton);
+    await userEvent.click(titleSortButton);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /标题\s*-/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "修改时间" })).toBeInTheDocument();
+      expect(titleSortButton).toHaveClass("is-active");
+      expect(modifiedAtSortButton).not.toHaveClass("is-active");
     });
 
     const firstRow = screen.getAllByRole("checkbox")[0]?.closest("tr");
     expect(firstRow).not.toBeNull();
     expect(within(firstRow as HTMLTableRowElement).getByText("C - Song 3.ogg")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "艺术家" }));
-    await userEvent.click(screen.getByRole("button", { name: /艺术家\s*\+/ }));
+    await userEvent.click(artistSortButton);
+    await userEvent.click(artistSortButton);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /艺术家\s*-/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "标题" })).toBeInTheDocument();
+      expect(artistSortButton).toHaveClass("is-active");
+      expect(titleSortButton).not.toHaveClass("is-active");
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "专辑" }));
-    await userEvent.click(screen.getByRole("button", { name: /专辑\s*\+/ }));
+    await userEvent.click(albumSortButton);
+    await userEvent.click(albumSortButton);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /专辑\s*-/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "艺术家" })).toBeInTheDocument();
+      expect(albumSortButton).toHaveClass("is-active");
+      expect(artistSortButton).not.toHaveClass("is-active");
     });
   });
 
@@ -559,6 +655,121 @@ describe("App integration", () => {
     });
   });
 
+  it("builds payload for special-char map and split metadata cleanup operations", async () => {
+    const taskId = "task-008";
+    const scanResult = createScanResult();
+
+    let statusCallCount = 0;
+    const previewBodies: Record<string, unknown>[] = [];
+
+    createFetchMock([
+      ({ url, method }) => {
+        if (url.endsWith("/api/tasks/scan/start") && method === "POST") {
+          return {
+            body: { task_id: taskId, task_type: "scan" },
+          };
+        }
+        return null as never;
+      },
+      ({ url, method }) => {
+        if (url === getStatusUrl(taskId) && method === "GET") {
+          statusCallCount += 1;
+          if (statusCallCount === 1) {
+            return {
+              body: createTaskStatus({
+                task_id: taskId,
+                state: "running",
+                progress_percent: 15,
+                current_subtask: "准备扫描",
+                result: undefined,
+              }),
+            };
+          }
+
+          return {
+            body: createTaskStatus({
+              task_id: taskId,
+              state: "completed",
+              progress_percent: 100,
+              current_subtask: "扫描完成",
+              result: scanResult,
+            }),
+          };
+        }
+        return null as never;
+      },
+      ({ url, method, body }) => {
+        if (url.endsWith("/api/operations/preview") && method === "POST") {
+          previewBodies.push(body);
+          return {
+            body: {
+              operation: String(body.operation ?? "swap_name_parts"),
+              directory: scanResult.directory,
+              items: [],
+              warnings: [],
+              has_conflict: false,
+              conflict_count: 0,
+            },
+          };
+        }
+        return null as never;
+      },
+    ]);
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: startButtonText }));
+    await waitFor(() => {
+      expect(screen.getByText(/扫描到 3 首/)).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
+    await userEvent.click(screen.getByRole("button", { name: "全选" }));
+
+    await userEvent.selectOptions(screen.getByLabelText("操作类型"), "special_char_replace");
+    await userEvent.type(screen.getByLabelText("映射 1 的源字符"), "&");
+    await userEvent.type(screen.getByLabelText("映射 1 的目标字符"), "、");
+    await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
+
+    await waitFor(() => {
+      expect(previewBodies.length).toBe(1);
+    });
+    expect(previewBodies[0]).toMatchObject({
+      operation: "special_char_replace",
+      special_char_map: { "&": "、" },
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText("操作类型"), "metadata_cleanup_text");
+    await userEvent.clear(screen.getByLabelText("清理文本或正则"));
+    await userEvent.type(screen.getByLabelText("清理文本或正则"), "feat\\.");
+    await userEvent.click(screen.getByLabelText("使用正则"));
+    await userEvent.click(screen.getByLabelText("大小写敏感"));
+    await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
+
+    await waitFor(() => {
+      expect(previewBodies.length).toBe(2);
+    });
+    expect(previewBodies[1]).toMatchObject({
+      operation: "metadata_cleanup_text",
+      cleanup_pattern: "feat\\.",
+      cleanup_use_regex: true,
+      cleanup_case_sensitive: true,
+      cleanup_fields: ["title", "artist", "album"],
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText("操作类型"), "metadata_cleanup_remove_fields");
+    await userEvent.type(screen.getByLabelText("删除字段（逗号分隔）"), "album,comment");
+    await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
+
+    await waitFor(() => {
+      expect(previewBodies.length).toBe(3);
+    });
+    expect(previewBodies[2]).toMatchObject({
+      operation: "metadata_cleanup_remove_fields",
+      remove_fields: ["album", "comment"],
+    });
+  });
+
   it("clears operation preview when generating with no selected files", async () => {
     const taskId = "task-004";
     const scanResult = createScanResult();
@@ -657,6 +868,7 @@ describe("App integration", () => {
       expect(previewCallCount).toBe(1);
       expect(screen.queryByText("预览结果")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "执行当前清单" })).toBeDisabled();
+      expect(screen.getByText("请先选择至少一个文件。")).toBeInTheDocument();
     });
   });
 });

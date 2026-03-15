@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.app.config import AppConfig
-from backend.app.duplicates import execute_duplicates, load_ignore_set, scan_duplicates
-from backend.app.models import DuplicateDecision, DuplicateExecuteRequest
+from app.config import AppConfig
+from app.duplicates import execute_duplicates, load_ignore_set, scan_duplicates
+from app.models import DuplicateDecision, DuplicateExecuteRequest
 
 
 class DuplicateFlowTests(unittest.TestCase):

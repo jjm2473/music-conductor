@@ -64,12 +64,16 @@ class OperationPreviewRequest(BaseModel):
         "special_char_replace",
         "metadata_fill_from_filename",
         "rename_from_metadata",
+        "metadata_cleanup_text",
+        "metadata_cleanup_remove_fields",
         "metadata_cleanup",
     ]
     selected_files: list[str] | None = None
+    special_char_map: dict[str, str] | None = None
     fill_mode: Literal["artist_title", "title_artist"] | None = None
     cleanup_pattern: str | None = None
     cleanup_use_regex: bool = False
+    cleanup_case_sensitive: bool = False
     cleanup_fields: list[str] | None = None
     remove_fields: list[str] | None = None
 
