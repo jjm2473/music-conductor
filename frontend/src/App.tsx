@@ -1,460 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-
-type MetadataSummary = {
-  title?: string | null;
-  artist?: string | null;
-  album?: string | null;
-};
-
-type MusicFileRecord = {
-  id: string;
-  file_name: string;
-  absolute_path: string;
-  extension: string;
-  size_bytes: number;
-  modified_at: string;
-  duration_seconds?: number | null;
-  metadata: MetadataSummary;
-};
-
-type ScanErrorItem = {
-  file_name: string;
-  reason: string;
-};
-
-type ScanResponse = {
-  directory: string;
-  files: MusicFileRecord[];
-  skipped: ScanErrorItem[];
-  total_files: number;
-};
-
-type MetadataReadResponse = {
-  directory: string;
-  file_name: string;
-  full_metadata: Record<string, unknown>;
-  duration_seconds?: number | null;
-  metadata_error?: string | null;
-};
-
-type MetadataUpdateResponse = {
-  directory: string;
-  file_name: string;
-  updated: boolean;
-  failed: ScanErrorItem[];
-};
-
-type MetadataChangeItem = {
-  field: string;
-  old_value?: string | null;
-  new_value?: string | null;
-};
-
-type OperationPlanItem = {
-  id: string;
-  action: "rename" | "metadata_update" | "delete" | "ignore";
-  target_type: "music" | "lrc" | "system";
-  source_file?: string | null;
-  destination_file?: string | null;
-  metadata_changes: MetadataChangeItem[];
-  reason?: string | null;
-  conflict: boolean;
-  conflict_reason?: string | null;
-};
-
-type OperationPreviewResponse = {
-  operation: string;
-  directory: string;
-  items: OperationPlanItem[];
-  warnings?: ScanErrorItem[];
-  has_conflict: boolean;
-  conflict_count: number;
-};
-
-type OperationExecuteResponse = {
-  operation: string;
-  directory: string;
-  has_conflict: boolean;
-  executed: OperationPlanItem[];
-  failed: ScanErrorItem[];
-};
-
-type DuplicateGroupFile = {
-  file_name: string;
-  extension: string;
-  size_bytes: number;
-  has_lrc: boolean;
-  duration_seconds?: number | null;
-};
-
-type DuplicateGroup = {
-  group_key: string;
-  files: DuplicateGroupFile[];
-};
-
-type DuplicateScanResponse = {
-  directory: string;
-  groups: DuplicateGroup[];
-  ignored_files: string[];
-};
-
-type DuplicateExecuteResponse = {
-  directory: string;
-  deleted_files: string[];
-  lrc_renamed: string[];
-  lrc_deleted: string[];
-  ignored_written: string[];
-  failed: ScanErrorItem[];
-};
-
-type OperationType =
-  | "swap_name_parts"
-  | "special_char_replace"
-  | "metadata_fill_from_filename"
-  | "rename_from_metadata"
-  | "metadata_cleanup_text"
-  | "metadata_cleanup_remove_fields";
-
-type SortKey =
-  | "file_name"
-  | "size_bytes"
-  | "modified_at"
-  | "duration_seconds"
-  | "title"
-  | "artist"
-  | "album";
-
-type SortState = {
-  key: SortKey;
-  order: "asc" | "desc";
-};
-
-type SpecialCharMapRow = {
-  id: string;
-  from: string;
-  to: string;
-};
-
-const getDefaultSortOrder = (key: SortKey): SortState["order"] => {
-  if (key === "file_name" || key === "title" || key === "artist" || key === "album") {
-    return "asc";
-  }
-  return "desc";
-};
-
-type SortHeaderButtonProps = {
-  label: string;
-  sortKey: SortKey;
-  sort: SortState;
-  onSort: (key: SortKey) => void;
-};
-
-function SortHeaderButton({ label, sortKey, sort, onSort }: SortHeaderButtonProps) {
-  const isActive = sort.key === sortKey;
-  const indicator = sort.order === "asc" ? "icon-unfold" : "icon-fold";
-
-  return (
-    <button
-      type="button"
-      className={`sort-button${isActive ? " is-active" : ""}`}
-      onClick={() => onSort(sortKey)}
-    >
-      <span>{label}</span>
-      <span
-        className={`sort-indicator iconfont ${isActive ? indicator : "icon-unfold"}${isActive ? "" : " is-placeholder"}`}
-        aria-hidden="true"
-      >
-      </span>
-    </button>
-  );
-}
-
-type DuplicateDecisionState = {
-  mode: "ignore" | "keep";
-  keep_file: string | null;
-};
-
-type TaskCreateResponse = {
-  task_id: string;
-  task_type: string;
-};
-
-type TaskState = "running" | "completed" | "failed";
-
-type TaskStatusResponse = {
-  task_id: string;
-  task_type: string;
-  state: TaskState;
-  progress_percent: number;
-  current_subtask?: string | null;
-  started_at: string;
-  finished_at?: string | null;
-  failed: ScanErrorItem[];
-  result?: unknown;
-};
-
-type ActiveTask = {
-  title: string;
-  taskId: string;
-  taskType: string;
-  state: TaskState;
-  progressPercent: number;
-  currentSubtask: string;
-  failed: ScanErrorItem[];
-};
-
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
-
-const formatBytes = (value: number): string => {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-  if (value < 1024 * 1024 * 1024) {
-    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-};
-
-const formatDuration = (value?: number | null): string => {
-  if (value == null) {
-    return "-";
-  }
-  const seconds = Math.max(0, Math.round(value));
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
-  return `${minutes}:${String(remaining).padStart(2, "0")}`;
-};
-
-const sleep = async (ms: number) => {
-  await new Promise((resolve) => window.setTimeout(resolve, ms));
-};
-
-const uniqueFailures = (items: ScanErrorItem[]): ScanErrorItem[] => {
-  const seen = new Set<string>();
-  const merged: ScanErrorItem[] = [];
-  for (const item of items) {
-    const key = `${item.file_name}::${item.reason}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    merged.push(item);
-  }
-  return merged;
-};
-
-const firstTagValue = (value: unknown): string => {
-  if (Array.isArray(value) && value.length > 0) {
-    return String(value[0] ?? "");
-  }
-  if (value == null) {
-    return "";
-  }
-  return String(value);
-};
-
-const parseErrorDetail = async (result: Response, fallback: string): Promise<string> => {
-  const payload = (await result.json().catch(() => null)) as { detail?: string } | null;
-  return payload?.detail ?? fallback;
-};
-
-const parseCsv = (value: string): string[] =>
-  value
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-
-const TIME_FILTER_OPTIONS = [
-  { value: 0, label: "全部", ms: Number.POSITIVE_INFINITY },
-  { value: 1, label: "1小时", ms: 60 * 60 * 1000 },
-  { value: 2, label: "6小时", ms: 6 * 60 * 60 * 1000 },
-  { value: 3, label: "1天", ms: 24 * 60 * 60 * 1000 },
-  { value: 4, label: "3天", ms: 3 * 24 * 60 * 60 * 1000 },
-  { value: 5, label: "1周", ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: 6, label: "1个月", ms: 30 * 24 * 60 * 60 * 1000 },
-  { value: 7, label: "6个月", ms: 183 * 24 * 60 * 60 * 1000 },
-  { value: 8, label: "1年", ms: 365 * 24 * 60 * 60 * 1000 },
-  { value: 9, label: "2年", ms: 2 * 365 * 24 * 60 * 60 * 1000 },
-  { value: 10, label: "5年", ms: 5 * 365 * 24 * 60 * 60 * 1000 },
-  { value: 11, label: "10年", ms: 10 * 365 * 24 * 60 * 60 * 1000 },
-  { value: 12, label: "20年", ms: 20 * 365 * 24 * 60 * 60 * 1000 },
-] as const;
-
-type TimeFilterValue = (typeof TIME_FILTER_OPTIONS)[number]["value"];
-
-const getTimeFilterOption = (value: TimeFilterValue) =>
-  TIME_FILTER_OPTIONS.find((item) => item.value === value) ?? TIME_FILTER_OPTIONS[0];
-
-const normalizeFileName = (fileName: string) => fileName.toLowerCase().trim();
-
-const buildMediaPreviewUrl = (directory: string, fileName: string): string => {
-  const params = new URLSearchParams({
-    directory,
-    file_name: fileName,
-  });
-  return `${API_BASE}/api/media/preview?${params.toString()}`;
-};
-
-const ignoreMediaPreviewError = () => {
-  // Some formats may not be decodable by current browser; ignore preview errors by requirement.
-};
-
-const formatPlayerTime = (seconds: number): string => {
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return "0:00";
-  }
-
-  const total = Math.floor(seconds);
-  const minutes = Math.floor(total / 60);
-  const remain = total % 60;
-  return `${minutes}:${String(remain).padStart(2, "0")}`;
-};
-
-type InlineAudioPreviewProps = {
-  playerId: string;
-  sourceUrl: string;
-};
-
-function InlineAudioPreview({ playerId, sourceUrl }: InlineAudioPreviewProps) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const [sourceLoaded, setSourceLoaded] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [loadingPlay, setLoadingPlay] = useState(false);
-  const [positionSec, setPositionSec] = useState(0);
-  const [durationSec, setDurationSec] = useState(0);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    const onPlay = () => {
-      setPlaying(true);
-      setLoadingPlay(false);
-    };
-    const onPause = () => {
-      setPlaying(false);
-    };
-    const onTimeUpdate = () => {
-      setPositionSec(audio.currentTime || 0);
-    };
-    const onLoadedMetadata = () => {
-      const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      setDurationSec(nextDuration);
-    };
-    const onEnded = () => {
-      setPlaying(false);
-    };
-    const onError = () => {
-      setLoadingPlay(false);
-      setPlaying(false);
-      ignoreMediaPreviewError();
-    };
-
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("loadedmetadata", onLoadedMetadata);
-    audio.addEventListener("ended", onEnded);
-    audio.addEventListener("error", onError);
-
-    return () => {
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
-      audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
-      audio.removeEventListener("ended", onEnded);
-      audio.removeEventListener("error", onError);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!sourceLoaded || !loadingPlay) {
-      return;
-    }
-
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    void audio.play().catch(() => {
-      setLoadingPlay(false);
-      ignoreMediaPreviewError();
-    });
-  }, [sourceLoaded, loadingPlay]);
-
-  const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    if (playing) {
-      audio.pause();
-      return;
-    }
-
-    setLoadingPlay(true);
-
-    if (!sourceLoaded) {
-      setSourceLoaded(true);
-      return;
-    }
-
-    void audio.play().catch(() => {
-      setLoadingPlay(false);
-      ignoreMediaPreviewError();
-    });
-  };
-
-  const onSeek = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const nextPosition = Number(event.target.value);
-    const audio = audioRef.current;
-    if (!audio || !Number.isFinite(nextPosition)) {
-      return;
-    }
-
-    audio.currentTime = nextPosition;
-    setPositionSec(nextPosition);
-  };
-
-  const normalizedDuration = durationSec > 0 ? durationSec : 0;
-  const normalizedPosition = Math.max(0, Math.min(positionSec, normalizedDuration));
-
-  return (
-    <div className="inline-audio-player" data-player-id={playerId}>
-      <button type="button" className="inline-audio-toggle" onClick={togglePlay}>
-        {playing ? "暂停" : loadingPlay ? "加载中" : "播放"}
-      </button>
-
-      <input
-        className="inline-audio-seek"
-        type="range"
-        min={0}
-        max={normalizedDuration}
-        step={1}
-        value={normalizedPosition}
-        onChange={onSeek}
-        disabled={normalizedDuration <= 0}
-        aria-label="播放位置"
-      />
-
-      <span className="inline-audio-time">{formatPlayerTime(normalizedPosition)} / {formatPlayerTime(normalizedDuration)}</span>
-
-      <audio
-        ref={audioRef}
-        preload="none"
-        src={sourceLoaded ? sourceUrl : undefined}
-      />
-    </div>
-  );
-}
+import type { KeyboardEvent } from "react";
+import InlineAudioPreview from "./components/InlineAudioPreview";
+import SortHeaderButton from "./components/SortHeaderButton";
+import type {
+  ActiveTask,
+  DuplicateDecisionState,
+  DuplicateExecuteResponse,
+  DuplicateScanResponse,
+  MetadataReadResponse,
+  MetadataUpdateResponse,
+  MusicFileRecord,
+  OperationExecuteResponse,
+  OperationPreviewResponse,
+  OperationType,
+  ScanErrorItem,
+  ScanResponse,
+  SortKey,
+  SortState,
+  SpecialCharMapRow,
+  TaskCreateResponse,
+  TaskState,
+  TaskStatusResponse,
+} from "./types";
+import {
+  API_BASE,
+  buildMediaPreviewUrl,
+  firstTagValue,
+  formatBytes,
+  formatDuration,
+  getDefaultSortOrder,
+  getTimeFilterOption,
+  normalizeFileName,
+  parseCsv,
+  parseErrorDetail,
+  sleep,
+  TIME_FILTER_OPTIONS,
+  type TimeFilterValue,
+  uniqueFailures,
+} from "./utils/appHelpers";
 
 export default function App() {
   const [directory, setDirectory] = useState("");
@@ -920,7 +503,7 @@ export default function App() {
     setSelectedFiles([]);
   };
 
-  const onTableKeyDown = (event: React.KeyboardEvent<HTMLTableSectionElement>) => {
+  const onTableKeyDown = (event: KeyboardEvent<HTMLTableSectionElement>) => {
     if (event.code !== "Space" || taskRunning) {
       return;
     }
@@ -1531,7 +1114,7 @@ export default function App() {
               aria-label="全选"
               title="全选"
             >
-              <span className="iconfont icon-check" aria-hidden="true" />
+              <span className="iconfont icon-selected" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -2014,7 +1597,7 @@ export default function App() {
             aria-label="回到顶部"
             title="回到顶部"
           >
-            <span className="iconfont icon-top1" aria-hidden="true" />
+            <span className="iconfont icon-top" aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -2023,7 +1606,7 @@ export default function App() {
             aria-label="滚到底部"
             title="滚到底部"
           >
-            <span className="iconfont icon-down" aria-hidden="true" />
+            <span className="iconfont icon-bottom" aria-hidden="true" />
           </button>
         </div>
       ) : null}
