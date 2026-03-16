@@ -6,6 +6,113 @@ from typing import Any, Iterable
 from mutagen import File as MutagenFile
 
 
+def _format_from_class_name(class_name: str) -> tuple[str | None, str | None]:
+    mapped = {
+        "MP3": ("MP3", "mp3"),
+        "FLAC": ("FLAC", "flac"),
+        "OggVorbis": ("OGG/Vorbis", "ogg"),
+        "OggOpus": ("Opus", "opus"),
+        "MP4": ("M4A/MP4", "m4a"),
+        "AAC": ("AAC", "aac"),
+        "ASF": ("WMA/ASF", "wma"),
+        "MonkeysAudio": ("APE", "ape"),
+        "WAVE": ("WAV", "wav"),
+        "AIFF": ("AIFF", "aiff"),
+    }
+    return mapped.get(class_name, (None, None))
+
+
+def _format_from_mime(mime_list: list[str]) -> tuple[str | None, str | None]:
+    normalized = [item.lower() for item in mime_list]
+
+    if any("audio/mpeg" in item for item in normalized):
+        return "MP3", "mp3"
+    if any("audio/flac" in item or "audio/x-flac" in item for item in normalized):
+        return "FLAC", "flac"
+    if any("audio/ogg" in item for item in normalized):
+        return "OGG/Vorbis", "ogg"
+    if any("audio/opus" in item for item in normalized):
+        return "Opus", "opus"
+    if any("audio/mp4" in item for item in normalized):
+        return "M4A/MP4", "m4a"
+    if any("audio/aac" in item for item in normalized):
+        return "AAC", "aac"
+    if any("audio/x-ms-wma" in item or "audio/asf" in item for item in normalized):
+        return "WMA/ASF", "wma"
+    if any("audio/x-ape" in item for item in normalized):
+        return "APE", "ape"
+    if any("audio/wav" in item or "audio/x-wav" in item for item in normalized):
+        return "WAV", "wav"
+    if any("audio/aiff" in item or "audio/x-aiff" in item for item in normalized):
+        return "AIFF", "aiff"
+
+    return None, None
+
+
+def detect_audio_format(
+    file_path: Path | None = None,
+    audio: Any | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Return (display_format, preferred_extension, error).
+
+    If `audio` is provided, reuse it directly to avoid parsing the file twice.
+    If only `file_path` is provided, try `easy=False` first and fall back to
+    `easy=True` for extension-mismatch edge cases.
+    """
+
+    target_audio = audio
+
+    if target_audio is None:
+        if file_path is None:
+            return None, None, "No file path provided for audio format detection"
+
+        primary_error: str | None = None
+        try:
+            target_audio = MutagenFile(file_path, easy=False)
+        except Exception as exc:  # pragma: no cover - third-party parser behavior
+            primary_error = str(exc)
+
+        # Some files with mismatched extension can fail in easy=False path while
+        # still being parseable by mutagen in easy mode (for example FLAC data
+        # stored under .mp3 suffix).
+        if target_audio is None:
+            fallback_error: str | None = None
+            try:
+                target_audio = MutagenFile(file_path, easy=True)
+            except Exception as exc:  # pragma: no cover - third-party parser behavior
+                fallback_error = str(exc)
+
+            if target_audio is None:
+                if primary_error and fallback_error:
+                    return None, None, f"{primary_error}; fallback easy=True failed: {fallback_error}"
+                if primary_error:
+                    return None, None, primary_error
+                if fallback_error:
+                    return None, None, fallback_error
+                return None, None, "Unsupported or unreadable audio format"
+
+    if target_audio is None:
+        return None, None, "Unsupported or unreadable audio format"
+
+    class_name = target_audio.__class__.__name__
+    display, preferred_extension = _format_from_class_name(class_name)
+    if display and preferred_extension:
+        return display, preferred_extension, None
+
+    # easy=True can return classes like EasyMP3 / EasyMP4.
+    if class_name.startswith("Easy"):
+        display, preferred_extension = _format_from_class_name(class_name[len("Easy") :])
+        if display and preferred_extension:
+            return display, preferred_extension, None
+
+    mime_list = [item for item in getattr(target_audio, "mime", []) if isinstance(item, str)]
+    display, preferred_extension = _format_from_mime(mime_list)
+    if display and preferred_extension:
+        return display, preferred_extension, None
+
+    return None, None, f"Unknown mutagen type: {class_name}"
+
+
 def resolve_directory(directory_value: str | None) -> Path:
     if not directory_value:
         raise ValueError("No directory provided.")
@@ -103,13 +210,28 @@ def read_easy_metadata(file_path: Path) -> tuple[dict[str, str], str | None]:
 def read_full_metadata(file_path: Path) -> tuple[dict[str, Any], str | None]:
     payload: dict[str, Any] = {}
 
+    primary_error: str | None = None
     try:
         audio = MutagenFile(file_path, easy=False)
     except Exception as exc:  # pragma: no cover - third-party parser behavior
-        return payload, str(exc)
+        audio = None
+        primary_error = str(exc)
 
     if audio is None:
-        return payload, "Unsupported or unreadable audio metadata"
+        fallback_error: str | None = None
+        try:
+            audio = MutagenFile(file_path, easy=True)
+        except Exception as exc:  # pragma: no cover - third-party parser behavior
+            fallback_error = str(exc)
+
+        if audio is None:
+            if primary_error and fallback_error:
+                return payload, f"{primary_error}; fallback easy=True failed: {fallback_error}"
+            if primary_error:
+                return payload, primary_error
+            if fallback_error:
+                return payload, fallback_error
+            return payload, "Unsupported or unreadable audio metadata"
 
     tags = getattr(audio, "tags", {}) or {}
     serialized_tags: dict[str, Any] = {}

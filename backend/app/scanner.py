@@ -6,19 +6,34 @@ from typing import Callable
 
 from mutagen import File as MutagenFile
 
+from .library import detect_audio_format
 from .models import MetadataSummary, MusicFileRecord, ScanErrorItem
 
 
-def _extract_metadata(file_path: Path) -> tuple[float | None, MetadataSummary, str | None]:
+def _extract_metadata(file_path: Path) -> tuple[float | None, MetadataSummary, str | None, str]:
     metadata = MetadataSummary()
 
     try:
         audio = MutagenFile(file_path, easy=True)
     except Exception as exc:  # pragma: no cover - depends on third-party parser behavior
-        return None, metadata, str(exc)
+        detected_format, _, format_error = detect_audio_format(file_path=file_path)
+        message = str(exc)
+        if format_error:
+            message = f"{message}; format detect failed: {format_error}"
+        return None, metadata, message, detected_format or "UNKNOWN"
 
     if audio is None:
-        return None, metadata, "Unsupported or unreadable audio metadata"
+        detected_format, _, format_error = detect_audio_format(file_path=file_path)
+    else:
+        detected_format, _, format_error = detect_audio_format(file_path=file_path, audio=audio)
+
+    display_format = detected_format or "UNKNOWN"
+
+    if audio is None:
+        message = "Unsupported or unreadable audio metadata"
+        if format_error:
+            message = f"{message}; format detect failed: {format_error}"
+        return None, metadata, message, display_format
 
     duration_seconds: float | None = None
     if getattr(audio, "info", None) is not None and getattr(audio.info, "length", None) is not None:
@@ -38,7 +53,7 @@ def _extract_metadata(file_path: Path) -> tuple[float | None, MetadataSummary, s
     metadata.artist = first_value("artist")
     metadata.album = first_value("album")
 
-    return duration_seconds, metadata, None
+    return duration_seconds, metadata, None, display_format
 
 
 def scan_music_directory(
@@ -65,7 +80,7 @@ def scan_music_directory(
         suffix = entry.suffix.lower().lstrip(".")
 
         stat = entry.stat()
-        duration_seconds, metadata, metadata_error = _extract_metadata(entry)
+        duration_seconds, metadata, metadata_error, detected_format = _extract_metadata(entry)
 
         records.append(
             MusicFileRecord(
@@ -73,6 +88,7 @@ def scan_music_directory(
                 file_name=entry.name,
                 absolute_path=str(entry.resolve()),
                 extension=suffix,
+                format=detected_format,
                 size_bytes=stat.st_size,
                 modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
                 duration_seconds=duration_seconds,

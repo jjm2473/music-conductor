@@ -17,6 +17,7 @@ class MusicFileRecord(BaseModel):
     file_name: str
     absolute_path: str
     extension: str
+    format: str
     size_bytes: int
     modified_at: datetime
     duration_seconds: float | None = None
@@ -62,6 +63,7 @@ class OperationPreviewRequest(BaseModel):
     operation: Literal[
         "swap_name_parts",
         "special_char_replace",
+        "fix_extension_by_format",
         "metadata_fill_from_filename",
         "rename_from_metadata",
         "metadata_cleanup_text",

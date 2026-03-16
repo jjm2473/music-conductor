@@ -69,6 +69,7 @@ Response shape:
       "file_name": "Artist - Title.mp3",
       "absolute_path": "/Users/you/Music/Artist - Title.mp3",
       "extension": "mp3",
+      "format": "MP3",
       "size_bytes": 1234567,
       "modified_at": "2026-03-16T08:00:00Z",
       "duration_seconds": 213.54,
@@ -159,6 +160,7 @@ Supported `operation` values:
 
 - `swap_name_parts`
 - `special_char_replace`
+- `fix_extension_by_format`
 - `metadata_fill_from_filename`
 - `rename_from_metadata`
 - `metadata_cleanup_text`
@@ -168,6 +170,7 @@ Supported `operation` values:
 Operation-specific fields:
 
 - `special_char_replace`: `special_char_map`
+- `fix_extension_by_format`: no extra fields
 - `metadata_fill_from_filename`: `fill_mode` (`artist_title` | `title_artist`)
 - `rename_from_metadata`: `fill_mode` (`artist_title` | `title_artist`)
 - `metadata_cleanup_text`: `cleanup_pattern`, `cleanup_use_regex`, `cleanup_case_sensitive`, `cleanup_fields`

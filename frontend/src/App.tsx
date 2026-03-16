@@ -144,6 +144,7 @@ export default function App() {
 
       const haystack = [
         file.file_name,
+        file.format,
         file.metadata.title ?? "",
         file.metadata.artist ?? "",
         file.metadata.album ?? "",
@@ -154,6 +155,16 @@ export default function App() {
     return [...filtered].sort((a, b) => {
       const factor = sort.order === "asc" ? 1 : -1;
       if (sort.key === "file_name") {
+        return a.file_name.localeCompare(b.file_name) * factor;
+      }
+      if (sort.key === "format") {
+        const formatOrder = a.format.localeCompare(b.format, undefined, {
+          sensitivity: "base",
+          numeric: true,
+        });
+        if (formatOrder !== 0) {
+          return formatOrder * factor;
+        }
         return a.file_name.localeCompare(b.file_name) * factor;
       }
       if (sort.key === "title" || sort.key === "artist" || sort.key === "album") {
@@ -1147,6 +1158,9 @@ export default function App() {
                     <SortHeaderButton label="文件名" sortKey="file_name" sort={sort} onSort={onSort} />
                   </th>
                   <th style={{width: '6em'}}>
+                    <SortHeaderButton label="格式" sortKey="format" sort={sort} onSort={onSort} />
+                  </th>
+                  <th style={{width: '6em'}}>
                     <SortHeaderButton label="大小" sortKey="size_bytes" sort={sort} onSort={onSort} />
                   </th>
                   <th>
@@ -1155,13 +1169,13 @@ export default function App() {
                   <th style={{width: '6em'}}>
                     <SortHeaderButton label="时长" sortKey="duration_seconds" sort={sort} onSort={onSort} />
                   </th>
-                  <th style={{width: '6em'}}>
+                  <th style={{minWidth: '6em'}}>
                     <SortHeaderButton label="标题" sortKey="title" sort={sort} onSort={onSort} />
                   </th>
                   <th>
                     <SortHeaderButton label="艺术家" sortKey="artist" sort={sort} onSort={onSort} />
                   </th>
-                  <th style={{width: '6em'}}>
+                  <th style={{minWidth: '6em'}}>
                     <SortHeaderButton label="专辑" sortKey="album" sort={sort} onSort={onSort} />
                   </th>
                   <th style={{width: '5em'}}>元数据</th>
@@ -1170,7 +1184,7 @@ export default function App() {
               <tbody onKeyDown={onTableKeyDown}>
                 {sortedFiles.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="empty-cell">
+                    <td colSpan={10} className="empty-cell">
                       {response ? "没有匹配结果" : "请先扫描目录"}
                     </td>
                   </tr>
@@ -1218,6 +1232,7 @@ export default function App() {
                         />
                       </td>
                       <td>{file.file_name}</td>
+                      <td>{file.format || "-"}</td>
                       <td>{formatBytes(file.size_bytes)}</td>
                       <td>{new Date(file.modified_at).toLocaleString()}</td>
                       <td>{formatDuration(file.duration_seconds)}</td>
@@ -1259,6 +1274,7 @@ export default function App() {
                 >
                   <option value="swap_name_parts">文件名 A-B 与 B-A 风格互换</option>
                   <option value="special_char_replace">特殊字符替换重命名</option>
+                  <option value="fix_extension_by_format">批量修复扩展名（按检测格式）</option>
                   <option value="metadata_fill_from_filename">根据文件名填充元数据</option>
                   <option value="rename_from_metadata">根据元数据修改文件名</option>
                   <option value="metadata_cleanup_text">清理元数据文本（支持正则/大小写）</option>
@@ -1414,7 +1430,7 @@ export default function App() {
 
                       {warnings.length > 0 ? (
                         <details className="skipped">
-                          <summary>元数据缺失或异常 {warnings.length} 项（未加入清单）</summary>
+                          <summary>警告与跳过 {warnings.length} 项（未加入清单）</summary>
                           <ul>
                             {warnings.map((item, index) => (
                               <li key={`${item.file_name}-${index}`}>{item.file_name}: {item.reason}</li>

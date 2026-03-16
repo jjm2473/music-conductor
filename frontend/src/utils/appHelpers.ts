@@ -3,7 +3,7 @@ import type { ScanErrorItem, SortKey, SortState } from "../types";
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 export const getDefaultSortOrder = (key: SortKey): SortState["order"] => {
-  if (key === "file_name" || key === "title" || key === "artist" || key === "album") {
+  if (key === "file_name" || key === "format" || key === "title" || key === "artist" || key === "album") {
     return "asc";
   }
   return "desc";

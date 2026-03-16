@@ -125,6 +125,62 @@ class OperationFlowTests(unittest.TestCase):
         self.assertTrue((self.directory / "B - A.mp3").exists())
         self.assertTrue((self.directory / "B - A.lrc").exists())
 
+    @patch("app.operations.detect_audio_format")
+    def test_fix_extension_preview_builds_items_and_warnings(self, mock_detect_audio_format) -> None:
+        (self.directory / "track.mp4").write_bytes(b"ID3")
+        (self.directory / "unknown.mp3").write_bytes(b"ID3")
+
+        def fake_detect(entry: Path) -> tuple[str | None, str | None, str | None]:
+            if entry.name == "track.mp4":
+                return "M4A/MP4", "m4a", None
+            if entry.name == "unknown.mp3":
+                return None, None, "cannot parse"
+            return None, None, "unexpected"
+
+        mock_detect_audio_format.side_effect = fake_detect
+
+        config = AppConfig(default_music_dir=str(self.directory))
+        preview = build_operation_preview(
+            OperationPreviewRequest(
+                directory=str(self.directory),
+                operation="fix_extension_by_format",
+            ),
+            config,
+        )
+
+        self.assertFalse(preview.has_conflict)
+        self.assertEqual(preview.conflict_count, 0)
+        self.assertEqual(len(preview.items), 1)
+        self.assertEqual(preview.items[0].source_file, "track.mp4")
+        self.assertEqual(preview.items[0].destination_file, "track.m4a")
+        self.assertEqual(len(preview.warnings), 1)
+        self.assertEqual(preview.warnings[0].file_name, "unknown.mp3")
+        self.assertIn("无法识别音频格式", preview.warnings[0].reason)
+
+    @patch("app.operations.detect_audio_format")
+    def test_execute_fix_extension_renames_music_file(self, mock_detect_audio_format) -> None:
+        source_music = self.directory / "track.mp4"
+        source_music.write_bytes(b"ID3")
+
+        mock_detect_audio_format.return_value = ("M4A/MP4", "m4a", None)
+
+        config = AppConfig(default_music_dir=str(self.directory))
+        result = execute_operation(
+            OperationPreviewRequest(
+                directory=str(self.directory),
+                operation="fix_extension_by_format",
+            ),
+            config,
+        )
+
+        self.assertFalse(result.has_conflict)
+        self.assertEqual(len(result.executed), 1)
+        self.assertEqual(result.executed[0].source_file, "track.mp4")
+        self.assertEqual(result.executed[0].destination_file, "track.m4a")
+        self.assertEqual(result.failed, [])
+        self.assertFalse(source_music.exists())
+        self.assertTrue((self.directory / "track.m4a").exists())
+
     @patch("app.operations.read_easy_metadata")
     def test_metadata_rename_preview_skips_unchanged_and_reports_missing(
         self,

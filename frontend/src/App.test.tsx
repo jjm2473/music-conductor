@@ -385,6 +385,7 @@ describe("App integration", () => {
     await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
 
     const fileNameSortButton = screen.getByRole("button", { name: "文件名" });
+    const formatSortButton = screen.getByRole("button", { name: "格式" });
     const sizeSortButton = screen.getByRole("button", { name: "大小" });
     const modifiedAtSortButton = screen.getByRole("button", { name: "修改时间" });
     const durationSortButton = screen.getByRole("button", { name: "时长" });
@@ -393,6 +394,7 @@ describe("App integration", () => {
     const albumSortButton = screen.getByRole("button", { name: "专辑" });
 
     expect(fileNameSortButton).toBeInTheDocument();
+    expect(formatSortButton).toBeInTheDocument();
     expect(sizeSortButton).toBeInTheDocument();
     expect(modifiedAtSortButton).toBeInTheDocument();
     expect(durationSortButton).toBeInTheDocument();
@@ -645,7 +647,7 @@ describe("App integration", () => {
     await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
 
     await waitFor(() => {
-      expect(screen.getByText("元数据缺失或异常 1 项（未加入清单）")).toBeInTheDocument();
+      expect(screen.getByText("警告与跳过 1 项（未加入清单）")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "执行当前清单" })).toBeDisabled();
     });
 
@@ -655,7 +657,7 @@ describe("App integration", () => {
     });
   });
 
-  it("builds payload for special-char map and split metadata cleanup operations", async () => {
+  it("builds payload for fix-extension, special-char map and split metadata cleanup operations", async () => {
     const taskId = "task-008";
     const scanResult = createScanResult();
 
@@ -726,15 +728,25 @@ describe("App integration", () => {
     await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
     await userEvent.click(screen.getByRole("button", { name: "全选" }));
 
-    await userEvent.selectOptions(screen.getByLabelText("操作类型"), "special_char_replace");
-    await userEvent.type(screen.getByLabelText("映射 1 的源字符"), "&");
-    await userEvent.type(screen.getByLabelText("映射 1 的目标字符"), "、");
+    await userEvent.selectOptions(screen.getByLabelText("操作类型"), "fix_extension_by_format");
     await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
 
     await waitFor(() => {
       expect(previewBodies.length).toBe(1);
     });
     expect(previewBodies[0]).toMatchObject({
+      operation: "fix_extension_by_format",
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText("操作类型"), "special_char_replace");
+    await userEvent.type(screen.getByLabelText("映射 1 的源字符"), "&");
+    await userEvent.type(screen.getByLabelText("映射 1 的目标字符"), "、");
+    await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
+
+    await waitFor(() => {
+      expect(previewBodies.length).toBe(2);
+    });
+    expect(previewBodies[1]).toMatchObject({
       operation: "special_char_replace",
       special_char_map: { "&": "、" },
     });
@@ -747,9 +759,9 @@ describe("App integration", () => {
     await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
 
     await waitFor(() => {
-      expect(previewBodies.length).toBe(2);
+      expect(previewBodies.length).toBe(3);
     });
-    expect(previewBodies[1]).toMatchObject({
+    expect(previewBodies[2]).toMatchObject({
       operation: "metadata_cleanup_text",
       cleanup_pattern: "feat\\.",
       cleanup_use_regex: true,
@@ -762,9 +774,9 @@ describe("App integration", () => {
     await userEvent.click(screen.getByRole("button", { name: "生成变更清单" }));
 
     await waitFor(() => {
-      expect(previewBodies.length).toBe(3);
+      expect(previewBodies.length).toBe(4);
     });
-    expect(previewBodies[2]).toMatchObject({
+    expect(previewBodies[3]).toMatchObject({
       operation: "metadata_cleanup_remove_fields",
       remove_fields: ["album", "comment"],
     });

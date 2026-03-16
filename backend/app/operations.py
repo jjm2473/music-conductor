@@ -8,6 +8,7 @@ from uuid import uuid4
 from .config import AppConfig
 from .library import (
     apply_special_char_map,
+    detect_audio_format,
     find_lrc_for_music,
     list_music_entries,
     parse_two_part_name,
@@ -174,6 +175,54 @@ def _build_special_char_preview(entries: list[Path], char_map: dict[str, str]) -
             )
 
     return items
+
+
+def _build_fix_extension_preview(
+    entries: list[Path],
+) -> tuple[list[OperationPlanItem], list[ScanErrorItem]]:
+    items: list[OperationPlanItem] = []
+    warnings: list[ScanErrorItem] = []
+
+    for entry in entries:
+        detected_format, preferred_extension, detect_error = detect_audio_format(entry)
+        if detect_error:
+            warnings.append(
+                ScanErrorItem(
+                    file_name=entry.name,
+                    reason=f"无法识别音频格式，已跳过: {detect_error}",
+                )
+            )
+            continue
+
+        if not preferred_extension:
+            warnings.append(
+                ScanErrorItem(
+                    file_name=entry.name,
+                    reason="无法确定目标扩展名，已跳过",
+                )
+            )
+            continue
+
+        current_extension = entry.suffix.lower().lstrip(".")
+        if current_extension == preferred_extension:
+            continue
+
+        destination_file = f"{entry.stem}.{preferred_extension}"
+        if destination_file == entry.name:
+            continue
+
+        items.append(
+            OperationPlanItem(
+                id="",
+                action="rename",
+                target_type="music",
+                source_file=entry.name,
+                destination_file=destination_file,
+                reason=f"根据检测格式({detected_format})修复扩展名",
+            )
+        )
+
+    return items, warnings
 
 
 def _build_metadata_fill_preview(
@@ -437,6 +486,8 @@ def build_operation_preview(payload: OperationPreviewRequest, config: AppConfig)
     elif payload.operation == "special_char_replace":
         char_map = payload.special_char_map if payload.special_char_map is not None else config.special_char_map
         items = _build_special_char_preview(entries, char_map)
+    elif payload.operation == "fix_extension_by_format":
+        items, warnings = _build_fix_extension_preview(entries)
     elif payload.operation == "metadata_fill_from_filename":
         fill_mode = payload.fill_mode or "artist_title"
         items = _build_metadata_fill_preview(entries, config.filename_delimiter, fill_mode)

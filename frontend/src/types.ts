@@ -9,6 +9,7 @@ export type MusicFileRecord = {
   file_name: string;
   absolute_path: string;
   extension: string;
+  format: string;
   size_bytes: number;
   modified_at: string;
   duration_seconds?: number | null;
@@ -108,6 +109,7 @@ export type DuplicateExecuteResponse = {
 export type OperationType =
   | "swap_name_parts"
   | "special_char_replace"
+  | "fix_extension_by_format"
   | "metadata_fill_from_filename"
   | "rename_from_metadata"
   | "metadata_cleanup_text"
@@ -115,6 +117,7 @@ export type OperationType =
 
 export type SortKey =
   | "file_name"
+  | "format"
   | "size_bytes"
   | "modified_at"
   | "duration_seconds"
