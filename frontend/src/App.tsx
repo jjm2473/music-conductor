@@ -478,6 +478,14 @@ export default function App() {
     selectRangeByIndex(dragAnchorIndex, index, dragSelectionMode === "select");
   };
 
+  const isInteractiveTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    return Boolean(target.closest("button, input, select, textarea, a, label"));
+  };
+
   const handleRowClick = (fileName: string, checked: boolean, index: number, withShiftKey: boolean) => {
     if (taskRunning) {
       return;
@@ -1206,6 +1214,16 @@ export default function App() {
                         if (event.button !== 0) {
                           return;
                         }
+
+                        if (isInteractiveTarget(event.target)) {
+                          return;
+                        }
+
+                        if (event.shiftKey) {
+                          handleRowClick(file.file_name, true, index, true);
+                          return;
+                        }
+
                         const checked = !selectedFiles.includes(file.file_name);
                         handleRowPointerDown(file.file_name, index, checked);
                       }}

@@ -331,6 +331,97 @@ describe("App integration", () => {
     });
   });
 
+  it("keeps checkbox and metadata button independent from row drag select, and supports shift row range", async () => {
+    const taskId = "task-009";
+    const scanResult = createScanResult();
+
+    let statusCallCount = 0;
+
+    createFetchMock([
+      ({ url, method }) => {
+        if (url.endsWith("/api/tasks/scan/start") && method === "POST") {
+          return {
+            body: { task_id: taskId, task_type: "scan" },
+          };
+        }
+        return null as never;
+      },
+      ({ url, method }) => {
+        if (url === getStatusUrl(taskId) && method === "GET") {
+          statusCallCount += 1;
+          if (statusCallCount === 1) {
+            return {
+              body: createTaskStatus({
+                task_id: taskId,
+                state: "running",
+                progress_percent: 12,
+                current_subtask: "准备扫描",
+                result: undefined,
+              }),
+            };
+          }
+
+          return {
+            body: createTaskStatus({
+              task_id: taskId,
+              state: "completed",
+              progress_percent: 100,
+              current_subtask: "扫描完成",
+              result: scanResult,
+            }),
+          };
+        }
+        return null as never;
+      },
+    ]);
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: startButtonText }));
+    await waitFor(() => {
+      expect(screen.getByText(/扫描到 3 首/)).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
+
+    const checkboxA = screen.getByRole("checkbox", { name: "选择 A - Song 1.mp3" });
+    const checkboxB = screen.getByRole("checkbox", { name: "选择 B - Song 2.flac" });
+    const checkboxC = screen.getByRole("checkbox", { name: "选择 C - Song 3.ogg" });
+
+    await userEvent.click(checkboxA);
+    expect(checkboxA).toBeChecked();
+
+    const metadataButton = screen.getByRole("button", { name: "编辑 A - Song 1.mp3 的元数据" });
+    fireEvent.pointerDown(metadataButton, { button: 0, pointerType: "mouse" });
+    expect(checkboxA).toBeChecked();
+    expect(checkboxB).not.toBeChecked();
+    expect(checkboxC).not.toBeChecked();
+
+    const rowA = checkboxA.closest("tr");
+    const rowB = checkboxB.closest("tr");
+    const rowC = checkboxC.closest("tr");
+    expect(rowA).not.toBeNull();
+    expect(rowB).not.toBeNull();
+    expect(rowC).not.toBeNull();
+
+    fireEvent.pointerDown(rowB as HTMLTableRowElement, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(window);
+    expect(checkboxB).toBeChecked();
+
+    fireEvent.pointerDown(rowC as HTMLTableRowElement, {
+      button: 0,
+      pointerType: "mouse",
+      shiftKey: true,
+    });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(checkboxA).toBeChecked();
+      expect(checkboxB).toBeChecked();
+      expect(checkboxC).toBeChecked();
+    });
+  });
+
   it("supports metadata sorting columns and only marks active column indicator", async () => {
     const taskId = "task-005";
     const scanResult = createScanResult();
