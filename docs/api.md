@@ -2,7 +2,14 @@
 
 Base URL (default): `http://127.0.0.1:8000`
 
-## 1) Health / Config
+## 1) General Conventions
+
+- Request/response body: JSON (`Content-Type: application/json`), except file stream endpoint.
+- Time fields: ISO-8601 string (UTC).
+- `directory` is optional on some endpoints; when omitted, backend falls back to `default_music_dir`.
+- Error format: HTTP 4xx/5xx with `{"detail": "..."}`.
+
+## 2) Health / Runtime Config
 
 ### GET /api/health
 
@@ -24,7 +31,22 @@ Response fields:
 - `music_extensions`
 - `security_enabled`
 
-## 2) Scan
+## 3) Media Preview
+
+### GET /api/media/preview
+
+Query params:
+
+- `directory`: optional, target folder
+- `file_name`: required, audio file name in target folder
+
+Behavior:
+
+- Streams source file directly for browser `<audio>` preview.
+- Restricted to configured audio extensions.
+- Invalid directory/path/file returns HTTP 400.
+
+## 4) Scan
 
 ### POST /api/scan
 
@@ -36,13 +58,44 @@ Request:
 }
 ```
 
+Response shape:
+
+```json
+{
+  "directory": "/Users/you/Music",
+  "files": [
+    {
+      "id": "Artist - Title.mp3",
+      "file_name": "Artist - Title.mp3",
+      "absolute_path": "/Users/you/Music/Artist - Title.mp3",
+      "extension": "mp3",
+      "size_bytes": 1234567,
+      "modified_at": "2026-03-16T08:00:00Z",
+      "duration_seconds": 213.54,
+      "metadata": {
+        "title": "Title",
+        "artist": "Artist",
+        "album": "Album"
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "file_name": "Broken.mp3",
+      "reason": "Metadata read failed: ..."
+    }
+  ],
+  "total_files": 1
+}
+```
+
 Behavior:
 
-- First-level files only
-- Ignore hidden files, symlinks, and subdirectories
-- Only configured audio extensions are included
+- Only scans first-level files in target directory.
+- Ignores subdirectories, hidden files, and symlinks.
+- Filters by configured audio extensions.
 
-## 3) Metadata
+## 5) Metadata
 
 ### POST /api/metadata/read
 
@@ -55,11 +108,13 @@ Request:
 }
 ```
 
-Response:
+Response fields:
 
-- `full_metadata`: full tag map and optional technical block
+- `directory`
+- `file_name`
+- `full_metadata`: full parsed metadata payload
 - `duration_seconds`
-- `metadata_error`: parser error if metadata cannot be read
+- `metadata_error`: parser error string when metadata parse is not fully successful
 
 ### POST /api/metadata/update
 
@@ -79,41 +134,28 @@ Request:
 
 Response:
 
-- `updated`: true or false
-- `failed`: per-file write failures
+```json
+{
+  "directory": "/Users/you/Music",
+  "file_name": "Artist - Title.mp3",
+  "updated": true,
+  "failed": []
+}
+```
 
-## 3.5) Media Preview
-
-### GET /api/media/preview
-
-Query:
-
-- `directory`: target directory (optional if server has default directory)
-- `file_name`: audio file name in that directory
-
-Behavior:
-
-- Returns raw audio file stream for browser playback (`<audio controls>`)
-- Only allows configured music extensions
-- Invalid path or file returns HTTP 400
-
-## 4) Operation Preview / Execute
+## 6) Operations (Preview / Execute)
 
 ### POST /api/operations/preview
 
 ### POST /api/operations/execute
 
-Shared request body:
+Shared request fields:
 
-```json
-{
-  "directory": "/Users/you/Music",
-  "operation": "swap_name_parts",
-  "selected_files": ["Artist - Title.mp3"]
-}
-```
+- `directory`: optional
+- `operation`: required
+- `selected_files`: optional list, empty/omitted means apply to all files
 
-`operation` values:
+Supported `operation` values:
 
 - `swap_name_parts`
 - `special_char_replace`
@@ -121,24 +163,30 @@ Shared request body:
 - `rename_from_metadata`
 - `metadata_cleanup_text`
 - `metadata_cleanup_remove_fields`
+- `metadata_cleanup` (legacy compatibility mode)
 
-Compatibility:
+Operation-specific fields:
 
-- `metadata_cleanup` remains accepted as a legacy combined mode.
+- `special_char_replace`: `special_char_map`
+- `metadata_fill_from_filename`: `fill_mode` (`artist_title` | `title_artist`)
+- `rename_from_metadata`: `fill_mode` (`artist_title` | `title_artist`)
+- `metadata_cleanup_text`: `cleanup_pattern`, `cleanup_use_regex`, `cleanup_case_sensitive`, `cleanup_fields`
+- `metadata_cleanup_remove_fields`: `remove_fields`
+- `metadata_cleanup` (legacy): can combine `cleanup_*` and `remove_fields`
 
-Extra fields by operation:
+Preview response highlights:
 
-- Special char replace: `special_char_map` (optional override map)
-- Fill from filename: `fill_mode` = `artist_title` | `title_artist`
-- Rename from metadata: `fill_mode` = `artist_title` | `title_artist`
-- Metadata text cleanup: `cleanup_pattern`, `cleanup_use_regex`, `cleanup_case_sensitive`, `cleanup_fields`
-- Metadata field removal: `remove_fields`
+- `items`: full operation plan list
+- `warnings`: non-fatal skips (for example missing metadata when renaming from metadata)
+- `has_conflict` + `conflict_count`: conflict summary
 
-Preview response notes:
+Execute response highlights:
 
-- `warnings`: files skipped from the rename list (for example, missing artist/title metadata or metadata read failure)
+- `has_conflict=true` means execution is blocked and `failed` contains conflict reasons.
+- `executed` contains successful plan items.
+- `failed` contains execution failures.
 
-## 5) Duplicate Scan / Execute
+## 7) Duplicates (Scan / Execute)
 
 ### POST /api/duplicates/scan
 
@@ -150,11 +198,11 @@ Request:
 }
 ```
 
-Response:
+Response fields:
 
-- `groups`: duplicate groups by `A - B` and `B - A` equivalence
-- each `groups[].files[]` item includes `file_name`, `extension`, `size_bytes`, `duration_seconds`, `has_lrc`
-- `ignored_files`: currently effective `.mcignore` names
+- `groups`: duplicate groups by normalized `A - B` / `B - A` equivalence
+- `groups[].files[]`: `file_name`, `extension`, `size_bytes`, `duration_seconds`, `has_lrc`
+- `ignored_files`: loaded from `.mcignore`
 
 ### POST /api/duplicates/execute
 
@@ -175,19 +223,27 @@ Request:
 
 Behavior:
 
-- `ignore_group=true`: appends the whole group to `.mcignore`
-- keep/delete mode: deletes non-kept files
-- lrc linkage: donor lrc can be adopted by kept files
+- `ignore_group=true`: append this group into `.mcignore`.
+- `ignore_group=false`: delete non-kept files in the group.
+- lrc linkage: kept file without lrc may adopt donor lrc from deleted siblings.
 
-## 6) Task APIs (Recommended for UI)
+Execute response fields:
+
+- `deleted_files`
+- `lrc_renamed`
+- `lrc_deleted`
+- `ignored_written`
+- `failed`
+
+## 8) Task APIs (Recommended for Frontend)
 
 Task start endpoints:
 
-- `POST /api/tasks/scan/start`
-- `POST /api/tasks/operations/start`
-- `POST /api/tasks/duplicates/start`
+- `POST /api/tasks/scan/start` (body = scan request)
+- `POST /api/tasks/operations/start` (body = operations request)
+- `POST /api/tasks/duplicates/start` (body = duplicates execute request)
 
-Task start response:
+Start response:
 
 ```json
 {
@@ -198,35 +254,51 @@ Task start response:
 
 ### GET /api/tasks/{task_id}
 
-Response:
+Response fields:
 
+- `task_id`
+- `task_type`
 - `state`: `running` | `completed` | `failed`
 - `progress_percent`
 - `current_subtask`
-- `failed`: accumulated failed subtasks
-- `result`: final endpoint result when completed
+- `started_at`
+- `finished_at`
+- `failed`: accumulated subtask failures
+- `result`: final business response payload when completed
 
-### GET /api/tasks/{task_id}/events
+### GET /api/tasks/{task_id}/events (SSE)
 
-SSE event types:
+Event types:
 
-- `status`
-- `progress`
-- `failure`
-- `completed`
-- `failed`
+- `status`: initial status event
+- `progress`: progress updates
+- `failure`: non-fatal subtask failure record
+- `completed`: task completed with `result`
+- `failed`: task-level failure
 
-Example SSE chunk:
+Example event chunk:
 
 ```text
 id: 3
 event: progress
-data: {"event_id":3,"state":"running","progress_percent":50.0,"current_subtask":"扫描文件: A - B.mp3","failed_count":0}
+data: {"event_id":3,"task_id":"...","state":"running","progress_percent":50.0,"current_subtask":"扫描文件: A - B.mp3","failed_count":0}
 
 ```
 
-## 7) Error Semantics
+## 9) Frontend Integration Recipe
 
-- Bad request parameters: HTTP 400 with `detail`
-- Missing task id: HTTP 404 with `detail: "Task not found"`
-- Task-level failures are also reported in `failed` arrays instead of hard-failing the whole batch
+Recommended flow for long-running actions:
+
+1. Call task start endpoint.
+2. Open blocking progress UI immediately.
+3. Subscribe SSE (`/events`) for near-real-time progress and failure list.
+4. Poll status (`/api/tasks/{task_id}`) every 200-500ms as source of truth.
+5. On `completed` or `failed`, use status result to refresh UI state.
+
+Direct synchronous endpoints (`/api/scan`, `/api/operations/execute`, `/api/duplicates/execute`) are still available for scripts or simple clients.
+
+## 10) Error Semantics
+
+- Invalid parameters/path/file: HTTP 400 with `detail`.
+- Unknown task id: HTTP 404 with `detail: "Task not found"`.
+- Batch/task failures are primarily returned in `failed` arrays, not always as hard HTTP failure.

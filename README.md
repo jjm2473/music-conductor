@@ -2,27 +2,58 @@
 
 Music Conductor is a local-first music file manager with a browser UI and backend service.
 
-Current status: backend core flow and frontend task-driven workflow are implemented (scan, operations, duplicates, metadata API, task progress API, metadata editor UI).
-
 - Backend: FastAPI + Mutagen
 - Frontend: React + TypeScript + Vite
 
-## Repository Layout
+## Project Structure
 
 ```
-backend/               # FastAPI service
+backend/
 	app/
-		main.py            # API entrypoint
-		config.py          # config loading and priority merge
-		scanner.py         # folder scan and metadata read
-		models.py          # request/response models
-frontend/              # React app
+		main.py                 # FastAPI routes and app bootstrap
+		models.py               # Pydantic request/response models
+		config.py               # config loading and merge priority (CLI > ENV > file > defaults)
+		scanner.py              # directory scan and metadata extraction
+		metadata_service.py     # metadata read/update service
+		operations.py           # operation preview and execute pipeline
+		duplicates.py           # duplicate grouping and execution
+		task_manager.py         # in-memory task state and SSE event stream
+		library.py              # shared path/metadata helper utilities
+	tests/
+		test_task_manager.py
+		test_duplicates.py
+		test_operations.py
+		test_metadata_service.py
+	requirements.txt
+
+frontend/
+	src/
+		App.tsx                 # main page and task-driven workflow
+		types.ts                # shared API/domain type definitions
+		utils/appHelpers.ts     # frontend helper functions
+		components/             # reusable UI components
+		test/                   # test setup and test utilities
+	package.json
+
 config/
-	config.toml.example  # sample runtime config
+	config.toml.example       # sample runtime config
+
 docs/
-tests/
-PROMPT.md              # PRD
+	api.md                    # backend API source-of-truth reference
+
+tests/                      # reserved for cross-layer integration/e2e tests
+PROMPT.md                   # product requirements / design constraints
 ```
+
+## Backend Module Ownership
+
+- API routes and HTTP contract: `backend/app/main.py`
+- Data models (single source for schema): `backend/app/models.py`
+- File scan and metadata parse: `backend/app/scanner.py`
+- Metadata read/write APIs: `backend/app/metadata_service.py`
+- Batch operation planning/execution: `backend/app/operations.py`
+- Duplicate strategy and `.mcignore` handling: `backend/app/duplicates.py`
+- Long-running task orchestration and SSE: `backend/app/task_manager.py`
 
 ## Prerequisites
 
@@ -89,14 +120,17 @@ cd frontend
 npm run test:run
 ```
 
-## Implemented APIs
+## API Documentation
 
-Detailed API reference:
+Source of truth:
 
 - `docs/api.md`
 
+Implemented endpoints (summary):
+
 - `GET /api/health`
 - `GET /api/config`
+- `GET /api/media/preview`
 - `POST /api/scan`
 - `POST /api/metadata/read`
 - `POST /api/metadata/update`
@@ -110,125 +144,23 @@ Detailed API reference:
 - `GET /api/tasks/{task_id}`
 - `GET /api/tasks/{task_id}/events`
 
-`/api/scan` request body:
+Operation values currently supported:
 
-```json
-{
-	"directory": "/Users/you/Music"
-}
-```
+- `swap_name_parts`
+- `special_char_replace`
+- `metadata_fill_from_filename`
+- `rename_from_metadata`
+- `metadata_cleanup_text`
+- `metadata_cleanup_remove_fields`
+- `metadata_cleanup` (legacy compatibility mode)
 
-Behavior:
+## Frontend Integration Notes
 
-- Scan first-level files only
-- Ignore subdirectories, hidden files, symlinks
-- Filter by configured audio extensions
-- Return basic metadata (`title`, `artist`, `album`) and duration when available
-
-### Operation Preview / Execute
-
-`/api/operations/preview` and `/api/operations/execute` share the same request shape.
-
-Core fields:
-
-- `directory`: target folder
-- `operation`: one of
-	- `swap_name_parts`
-	- `special_char_replace`
-	- `metadata_fill_from_filename`
-	- `metadata_cleanup`
-- `selected_files`: optional list of file names; if omitted, applies to all scanned files
-
-Optional fields:
-
-- For fill: `fill_mode` = `artist_title` | `title_artist`
-- For cleanup:
-	- `cleanup_pattern`
-	- `cleanup_use_regex`
-	- `cleanup_fields`
-	- `remove_fields`
-
-Preview returns full change list and conflict states.
-Execute will block when conflicts exist and return failed items.
-
-### Metadata Read / Update
-
-`/api/metadata/read` request:
-
-```json
-{
-	"directory": "/Users/you/Music",
-	"file_name": "Artist A - Song B.mp3"
-}
-```
-
-`/api/metadata/update` request:
-
-```json
-{
-	"directory": "/Users/you/Music",
-	"file_name": "Artist A - Song B.mp3",
-	"updates": {
-		"title": "Song B",
-		"artist": "Artist A"
-	},
-	"remove_fields": ["album"]
-}
-```
-
-Read returns full metadata map + technical info when available.
-Update uses easy tags and returns failed items when write is unsupported.
-
-### Duplicate Scan / Execute
-
-`/api/duplicates/scan` request:
-
-```json
-{
-	"directory": "/Users/you/Music"
-}
-```
-
-It returns duplicate groups by `A - B` and `B - A` equivalence and applies `.mcignore` filtering.
-
-`/api/duplicates/execute` request:
-
-```json
-{
-	"directory": "/Users/you/Music",
-	"decisions": [
-		{
-			"group_key": "artist a::song b",
-			"ignore_group": false,
-			"keep_files": ["Artist A - Song B.mp3"]
-		}
-	]
-}
-```
-
-Execute behavior:
-
-- ignore group -> append all names in that group into `.mcignore`
-- keep + delete -> delete unkept music files
-- lrc handling -> keep file missing lrc will try to adopt from deleted siblings
-- no restore mechanism
-
-### Task Progress APIs (Long-running jobs)
-
-Task start endpoints return `task_id` immediately, then client can poll status or subscribe to SSE:
-
-- Status: `GET /api/tasks/{task_id}`
-- Events (SSE): `GET /api/tasks/{task_id}/events`
-
-Event types:
-
-- `status`
-- `progress`
-- `failure`
-- `completed`
-- `failed`
-
-This supports real-time progress and failed-subtask reporting during execution.
+- For scan/operations/duplicates, prefer task endpoints (`/api/tasks/*/start`) plus status polling and SSE events.
+- Keep synchronous endpoints as fallback for script use or quick debugging.
+- Frontend type contracts should be aligned with:
+  - `backend/app/models.py`
+  - `frontend/src/types.ts`
 
 ## Smoke Test Notes
 
