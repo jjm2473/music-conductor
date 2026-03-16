@@ -5,10 +5,13 @@ Music Conductor is a local-first music file manager with a browser UI and backen
 - Backend: FastAPI + Mutagen
 - Frontend: React + TypeScript + Vite
 
+Note: use python venv in `backend/.venv`, don't create venv on root.
+
 ## Project Structure
 
 ```
 backend/
+	.venv/                      # python venv, not included in source
 	app/
 		main.py                 # FastAPI routes and app bootstrap
 		models.py               # Pydantic request/response models
