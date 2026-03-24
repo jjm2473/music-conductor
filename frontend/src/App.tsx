@@ -1209,7 +1209,7 @@ export default function App() {
           <p className="eyebrow">LOCAL MUSIC OPS</p>
           <h1>Music Conductor</h1>
           <p className="subtitle">
-            先扫描，再预览，再执行。已接入任务进度与失败子任务展示，并支持单文件完整元数据查看和编辑。
+            先扫描音乐目录，完成后即可对音乐文件进行批量重命名、元数据编辑、特殊字符替换等操作，也可以扫描并处理重复文件。
           </p>
         </section>
 
