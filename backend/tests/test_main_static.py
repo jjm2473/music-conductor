@@ -7,7 +7,13 @@ from pathlib import Path
 from starlette.routing import Mount, Route
 
 from app.config import AppConfig
-from app.main import create_app
+from app.main import (
+    ASSET_STATIC_CACHE_CONTROL,
+    HTML_STATIC_CACHE_CONTROL,
+    CachedStaticFiles,
+    _cache_control_for_static_path,
+    create_app,
+)
 
 
 class MainStaticTests(unittest.TestCase):
@@ -26,12 +32,18 @@ class MainStaticTests(unittest.TestCase):
         mounts = [route for route in app.router.routes if isinstance(route, Mount)]
         static_mount = next((route for route in mounts if route.name == "frontend"), None)
         self.assertIsNotNone(static_mount)
+        assert static_mount is not None
+        self.assertIsInstance(static_mount.app, CachedStaticFiles)
 
     def test_api_routes_still_registered_with_static_mount(self) -> None:
         app = create_app(AppConfig(), frontend_dist=self.dist)
         routes = [route for route in app.router.routes if isinstance(route, Route)]
         health_route = next((route for route in routes if route.path == "/api/health"), None)
         self.assertIsNotNone(health_route)
+
+    def test_static_cache_control_policy(self) -> None:
+        self.assertEqual(_cache_control_for_static_path("/tmp/dist/index.html"), HTML_STATIC_CACHE_CONTROL)
+        self.assertEqual(_cache_control_for_static_path("/tmp/dist/assets/app.js"), ASSET_STATIC_CACHE_CONTROL)
 
 
 if __name__ == "__main__":

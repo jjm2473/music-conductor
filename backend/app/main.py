@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import mimetypes
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from .config import AppConfig, load_app_config
 from .duplicates import execute_duplicates, scan_duplicates
@@ -37,6 +39,27 @@ from .models import (
 from .operations import build_operation_preview, execute_operation
 from .scanner import scan_music_directory
 from .task_manager import TASK_MANAGER, TaskReporter
+
+
+HTML_STATIC_CACHE_CONTROL = "public, max-age=300"
+ASSET_STATIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+def _cache_control_for_static_path(path: str) -> str:
+    return HTML_STATIC_CACHE_CONTROL if path.lower().endswith(".html") else ASSET_STATIC_CACHE_CONTROL
+
+
+class CachedStaticFiles(StaticFiles):
+    def file_response(
+        self,
+        full_path: str | os.PathLike[str],
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> FileResponse:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = _cache_control_for_static_path(str(full_path))
+        return response
 
 
 def _resolve_frontend_dist(frontend_dist: Path | None = None) -> Path:
@@ -292,7 +315,7 @@ def create_app(config: AppConfig | None = None, frontend_dist: Path | None = Non
     frontend_dist_dir = _resolve_frontend_dist(frontend_dist)
     if frontend_dist_dir.exists() and frontend_dist_dir.is_dir():
         # API routes keep precedence because they are registered before this mount.
-        app.mount("/", StaticFiles(directory=str(frontend_dist_dir), html=True), name="frontend")
+        app.mount("/", CachedStaticFiles(directory=str(frontend_dist_dir), html=True), name="frontend")
 
     return app
 
