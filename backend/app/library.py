@@ -1,9 +1,26 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+import subprocess
 from typing import Any, Iterable
 
 from mutagen import File as MutagenFile
+
+
+ROOT_EXCLUDED_DIRS = {
+    "sys",
+    "proc",
+    "dev",
+    "run",
+    "tmp",
+    "var",
+    "cores",
+    "private",
+    "System",
+    "Library",
+    "Applications",
+}
 
 
 def _format_from_class_name(class_name: str) -> tuple[str | None, str | None]:
@@ -156,6 +173,129 @@ def list_music_entries(directory: Path, extensions: set[str]) -> list[Path]:
             continue
         entries.append(entry)
     return entries
+
+
+def _is_root_excluded_path(path: Path, excluded: set[str]) -> bool:
+    parts = [item for item in path.as_posix().split("/") if item]
+    if not parts:
+        return False
+    return parts[0] in excluded
+
+
+def _list_mounted_directories(excluded: set[str] | None = None) -> list[Path]:
+    excluded_roots = excluded if excluded is not None else ROOT_EXCLUDED_DIRS
+
+    try:
+        result = subprocess.run(
+            ["mount"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return []
+
+    if result.returncode != 0:
+        return []
+
+    mounted: dict[str, Path] = {}
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        match = re.search(r" on (.+?) \(", line)
+        if match is None:
+            match = re.search(r" on (.+?) type ", line)
+        if match is None:
+            continue
+
+        mount_point = match.group(1).strip()
+        path = Path(mount_point)
+        if not path.is_absolute():
+            continue
+
+        resolved = path.resolve(strict=False)
+        if resolved == Path("/"):
+            continue
+        if _is_root_excluded_path(resolved, excluded_roots):
+            continue
+        mounted[resolved.as_posix()] = resolved
+
+    return sorted(mounted.values(), key=lambda item: item.as_posix().lower())
+
+
+def suggest_directories(
+    user_input: str | None,
+    *,
+    limit: int = 50,
+    root_excluded_dirs: set[str] | None = None,
+) -> tuple[str, str, list[str], bool]:
+    raw_input = (user_input or "").strip()
+    safe_limit = max(1, min(limit, 200))
+    excluded = root_excluded_dirs if root_excluded_dirs is not None else ROOT_EXCLUDED_DIRS
+
+    if not raw_input:
+        return raw_input, "", [], False
+
+    if not raw_input.startswith("/"):
+        raw_input = f"/{raw_input.lstrip('/')}"
+
+    probe_path = Path(raw_input).expanduser()
+    if not probe_path.is_absolute():
+        probe_path = probe_path.resolve(strict=False)
+
+    if raw_input.endswith("/"):
+        base_dir = probe_path.resolve(strict=False)
+        name_prefix = ""
+    else:
+        base_dir = probe_path.parent.resolve(strict=False)
+        name_prefix = probe_path.name
+
+    normalized_input_path = probe_path.resolve(strict=False)
+
+    if not base_dir.exists() or not base_dir.is_dir():
+        return raw_input, str(base_dir), [], False
+
+    normalized_prefix = name_prefix.lower()
+    candidates: list[str] = []
+    candidate_seen: set[str] = set()
+
+    try:
+        entries = sorted(base_dir.iterdir(), key=lambda item: item.name.lower())
+    except PermissionError:
+        return raw_input, str(base_dir), [], False
+
+    if base_dir == Path("/") and raw_input == "/":
+        entries.extend(_list_mounted_directories())
+
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        if entry.is_symlink() or not entry.is_dir():
+            continue
+        resolved_entry = entry.resolve(strict=False)
+        if base_dir == Path("/") and resolved_entry == Path("/"):
+            continue
+        if base_dir == Path("/") and _is_root_excluded_path(resolved_entry, excluded):
+            continue
+        if not raw_input.endswith("/") and resolved_entry == normalized_input_path:
+            continue
+
+        if normalized_prefix and not entry.name.lower().startswith(normalized_prefix):
+            continue
+
+        candidate_path = resolved_entry.as_posix().rstrip("/") + "/"
+        if candidate_path in candidate_seen:
+            continue
+        candidate_seen.add(candidate_path)
+        candidates.append(candidate_path)
+        if len(candidates) >= safe_limit:
+            break
+
+    truncated = len(candidates) >= safe_limit
+    return raw_input, str(base_dir), candidates, truncated
 
 
 def find_lrc_for_music(music_path: Path) -> Path | None:

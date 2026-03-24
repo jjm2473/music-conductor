@@ -31,6 +31,40 @@ Response fields:
 - `music_extensions`
 - `security_enabled`
 
+Frontend behavior contract:
+
+- Frontend should call this endpoint on startup.
+- If `default_music_dir` is non-empty, initialize scan directory input with it.
+- If `default_music_dir` is empty/null, frontend should wait for user input.
+
+### GET /api/directories/suggest
+
+Query params:
+
+- `prefix`: user input path
+- `limit`: optional, max candidates (default 50, max 200)
+
+Response shape:
+
+```json
+{
+  "input": "/Users/demo/M",
+  "base_dir": "/Users/demo",
+  "candidates": [
+    "/Users/demo/Music/",
+    "/Users/demo/Movies/"
+  ],
+  "truncated": false
+}
+```
+
+Behavior:
+
+- If `prefix` ends with `/`, backend returns direct child directories under that path.
+- Otherwise backend returns sibling directories in parent folder whose names start with the last segment.
+- Hidden directories and symlinks are excluded.
+- When base directory is root (`/`), system directories are excluded by default (`/sys`, `/proc`, `/dev`, `/run`, `/tmp`, `/var`, `/cores`, `/private`, `/System`, `/Library`, `/Applications`).
+
 ## 3) Media Preview
 
 ### GET /api/media/preview
@@ -305,3 +339,9 @@ Direct synchronous endpoints (`/api/scan`, `/api/operations/execute`, `/api/dupl
 - Invalid parameters/path/file: HTTP 400 with `detail`.
 - Unknown task id: HTTP 404 with `detail: "Task not found"`.
 - Batch/task failures are primarily returned in `failed` arrays, not always as hard HTTP failure.
+
+## 11) Static Frontend Hosting
+
+- Backend can serve frontend static files directly when `frontend/dist` exists.
+- `/api/*` routes remain backend API endpoints.
+- Non-API static requests are served from frontend build output.

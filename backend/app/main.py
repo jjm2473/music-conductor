@@ -10,12 +10,14 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import AppConfig, load_app_config
 from .duplicates import execute_duplicates, scan_duplicates
 from .library import resolve_directory, resolve_file_in_directory
 from .metadata_service import read_metadata, update_metadata
 from .models import (
+    DirectorySuggestResponse,
     DuplicateExecuteRequest,
     DuplicateExecuteResponse,
     DuplicateScanRequest,
@@ -37,7 +39,13 @@ from .scanner import scan_music_directory
 from .task_manager import TASK_MANAGER, TaskReporter
 
 
-def create_app(config: AppConfig | None = None) -> FastAPI:
+def _resolve_frontend_dist(frontend_dist: Path | None = None) -> Path:
+    if frontend_dist is not None:
+        return frontend_dist
+    return Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+
+def create_app(config: AppConfig | None = None, frontend_dist: Path | None = None) -> FastAPI:
     app = FastAPI(title="Music Conductor API", version="0.1.0")
 
     app.add_middleware(
@@ -65,6 +73,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "music_extensions": current.music_extensions,
             "security_enabled": current.security_enabled,
         }
+
+    @app.get("/api/directories/suggest", response_model=DirectorySuggestResponse)
+    def suggest_scan_directories(prefix: str = "", limit: int = 50) -> DirectorySuggestResponse:
+        from .library import suggest_directories
+
+        raw_input, base_dir, candidates, truncated = suggest_directories(prefix, limit=limit)
+        return DirectorySuggestResponse(
+            input=raw_input,
+            base_dir=base_dir,
+            candidates=candidates,
+            truncated=truncated,
+        )
 
     @app.get("/api/media/preview")
     def preview_media(
@@ -268,6 +288,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 "X-Accel-Buffering": "no",
             },
         )
+
+    frontend_dist_dir = _resolve_frontend_dist(frontend_dist)
+    if frontend_dist_dir.exists() and frontend_dist_dir.is_dir():
+        # API routes keep precedence because they are registered before this mount.
+        app.mount("/", StaticFiles(directory=str(frontend_dist_dir), html=True), name="frontend")
 
     return app
 

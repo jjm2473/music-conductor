@@ -28,6 +28,21 @@ export type ScanResponse = {
   total_files: number;
 };
 
+export type RuntimeConfigResponse = {
+  host: string;
+  port: number;
+  default_music_dir?: string | null;
+  music_extensions: string[];
+  security_enabled: boolean;
+};
+
+export type DirectorySuggestResponse = {
+  input: string;
+  base_dir: string;
+  candidates: string[];
+  truncated: boolean;
+};
+
 export type MetadataReadResponse = {
   directory: string;
   file_name: string;

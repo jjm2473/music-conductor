@@ -1,6 +1,12 @@
 import type { ScanErrorItem, SortKey, SortState } from "../types";
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const envApiBase = (import.meta.env.VITE_API_BASE ?? "").trim();
+
+// Priority:
+// 1) Explicit VITE_API_BASE
+// 2) Dev/Test default backend during split frontend/backend workflow
+// 3) Production same-origin (backend serves frontend assets)
+export const API_BASE = envApiBase || (import.meta.env.DEV || import.meta.env.MODE === "test" ? "http://127.0.0.1:8000" : "");
 
 export const getDefaultSortOrder = (key: SortKey): SortState["order"] => {
   if (key === "file_name" || key === "format" || key === "title" || key === "artist" || key === "album") {
@@ -100,4 +106,12 @@ export const buildMediaPreviewUrl = (directory: string, fileName: string): strin
     file_name: fileName,
   });
   return `${API_BASE}/api/media/preview?${params.toString()}`;
+};
+
+export const buildDirectorySuggestUrl = (prefix: string, limit = 50): string => {
+  const params = new URLSearchParams({
+    prefix,
+    limit: String(limit),
+  });
+  return `${API_BASE}/api/directories/suggest?${params.toString()}`;
 };

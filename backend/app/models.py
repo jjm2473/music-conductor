@@ -33,6 +33,13 @@ class ScanRequest(BaseModel):
     directory: str | None = None
 
 
+class DirectorySuggestResponse(BaseModel):
+    input: str
+    base_dir: str
+    candidates: list[str]
+    truncated: bool = False
+
+
 class ScanResponse(BaseModel):
     directory: str
     files: list[MusicFileRecord]

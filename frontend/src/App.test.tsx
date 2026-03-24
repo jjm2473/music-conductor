@@ -974,4 +974,106 @@ describe("App integration", () => {
       expect(screen.getByText("请先选择至少一个文件。")).toBeInTheDocument();
     });
   });
+
+  it("loads default directory, supports directory suggestions and opens floating player", async () => {
+    const taskId = "task-010";
+    const scanResult = createScanResult("/tmp/music");
+    let statusCallCount = 0;
+
+    createFetchMock([
+      ({ url, method }) => {
+        if (url.endsWith("/api/config") && method === "GET") {
+          return {
+            body: {
+              host: "127.0.0.1",
+              port: 8000,
+              default_music_dir: "/Users/demo/Music",
+              music_extensions: ["mp3", "flac"],
+              security_enabled: false,
+            },
+          };
+        }
+        return null as never;
+      },
+      ({ url, method }) => {
+        if (url.includes("/api/directories/suggest?") && method === "GET") {
+          return {
+            body: {
+              input: "/Users/demo/M",
+              base_dir: "/Users/demo",
+              candidates: ["/Users/demo/Music/", "/Users/demo/Movies/"],
+              truncated: false,
+            },
+          };
+        }
+        return null as never;
+      },
+      ({ url, method }) => {
+        if (url.endsWith("/api/tasks/scan/start") && method === "POST") {
+          return {
+            body: { task_id: taskId, task_type: "scan" },
+          };
+        }
+        return null as never;
+      },
+      ({ url, method }) => {
+        if (url === getStatusUrl(taskId) && method === "GET") {
+          statusCallCount += 1;
+          if (statusCallCount === 1) {
+            return {
+              body: createTaskStatus({
+                task_id: taskId,
+                state: "running",
+                progress_percent: 10,
+                current_subtask: "准备扫描",
+                result: undefined,
+              }),
+            };
+          }
+
+          return {
+            body: createTaskStatus({
+              task_id: taskId,
+              state: "completed",
+              progress_percent: 100,
+              current_subtask: "扫描完成",
+              result: scanResult,
+            }),
+          };
+        }
+        return null as never;
+      },
+    ]);
+
+    render(<App />);
+
+    const directoryInput = screen.getByLabelText("音乐目录") as HTMLInputElement;
+    await waitFor(() => {
+      expect(directoryInput.value).toBe("/Users/demo/Music");
+    });
+
+    await userEvent.clear(directoryInput);
+    await userEvent.type(directoryInput, "/Users/demo/M");
+
+    await waitFor(() => {
+      expect(screen.getByRole("listbox", { name: "目录补全候选" })).toBeInTheDocument();
+    });
+
+    const option = await screen.findByRole("button", { name: "/Users/demo/Music/" });
+    await userEvent.click(option);
+    expect(directoryInput.value).toBe("/Users/demo/Music/");
+
+    await userEvent.click(screen.getByRole("button", { name: startButtonText }));
+    await waitFor(() => {
+      expect(screen.getByText(/扫描到 3 首/)).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "关闭任务面板" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "播放 A - Song 1.mp3" }));
+    await waitFor(() => {
+      const dock = screen.getByLabelText("全局播放器");
+      expect(dock).toBeInTheDocument();
+      expect(within(dock).getByText("A - Song 1.mp3")).toBeInTheDocument();
+    });
+  });
 });

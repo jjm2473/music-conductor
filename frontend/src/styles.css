@@ -66,6 +66,7 @@ body {
 }
 
 .controls {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 10px;
@@ -75,6 +76,40 @@ body {
 .controls label {
   font-family: "IBM Plex Mono", monospace;
   color: var(--muted);
+}
+
+.directory-suggestions {
+  position: absolute;
+  left: 88px;
+  right: 52px;
+  top: calc(100% + 6px);
+  z-index: 5;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 12px 28px #13203a1f;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.directory-suggestion-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 500;
+  padding: 8px 10px;
+}
+
+.directory-suggestion-item:hover,
+.directory-suggestion-item.is-active {
+  background: #eef6ff;
+  color: #0c4d85;
 }
 
 input[type="text"],
@@ -352,6 +387,78 @@ th {
   height: 30px;
 }
 
+.file-name-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.row-play-btn {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+  background: #e9f8f5;
+  box-shadow: none;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.row-play-btn .iconfont {
+  font-size: 14px;
+}
+
+.floating-audio-dock {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 320px;
+  z-index: 960;
+  border-radius: 14px;
+  border: 1px solid #d5e4ff;
+  background: #ffffffed;
+  box-shadow: 0 14px 32px #10254a2b;
+  backdrop-filter: blur(8px);
+  padding: 10px 12px;
+}
+
+.floating-audio-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.floating-audio-title {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-audio-close {
+  width: 28px;
+  height: 28px;
+  background: #f6f8fc;
+  color: var(--muted);
+}
+
+.floating-audio-inline {
+  margin-top: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.floating-audio-inline .inline-audio-seek {
+  flex: 1;
+  min-width: 120px;
+  width: auto;
+}
+
 .ops-panel,
 .dup-panel {
   margin-top: 16px;
@@ -517,13 +624,31 @@ th {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 320px;
 }
 
 .inline-audio-toggle {
-  padding: 6px 10px;
-  font-size: 12px;
-  min-width: 54px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  flex: 0 0 34px;
+}
+
+.inline-audio-toggle .iconfont {
+  width: 100%;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.inline-audio-toggle .is-spinning {
+  animation: inline-audio-spin 0.9s linear infinite;
 }
 
 .inline-audio-seek {
@@ -540,6 +665,15 @@ th {
 
 .inline-audio-player audio {
   display: none;
+}
+
+@keyframes inline-audio-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .global-scroll-actions {
@@ -722,6 +856,12 @@ tbody tr:focus {
     grid-template-columns: 1fr;
   }
 
+  .directory-suggestions {
+    left: 0;
+    right: 0;
+    top: calc(100% + 8px);
+  }
+
   .toolbar {
     grid-template-columns: 1fr;
   }
@@ -756,6 +896,16 @@ tbody tr:focus {
   .group-file-item {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .floating-audio-dock {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .floating-audio-inline {
+    min-width: 0;
   }
 
   .inline-audio-player {

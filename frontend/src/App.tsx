@@ -4,6 +4,7 @@ import InlineAudioPreview from "./components/InlineAudioPreview";
 import SortHeaderButton from "./components/SortHeaderButton";
 import type {
   ActiveTask,
+  DirectorySuggestResponse,
   DuplicateDecisionState,
   DuplicateExecuteResponse,
   DuplicateScanResponse,
@@ -13,6 +14,7 @@ import type {
   OperationExecuteResponse,
   OperationPreviewResponse,
   OperationType,
+  RuntimeConfigResponse,
   ScanErrorItem,
   ScanResponse,
   SortKey,
@@ -24,6 +26,7 @@ import type {
 } from "./types";
 import {
   API_BASE,
+  buildDirectorySuggestUrl,
   buildMediaPreviewUrl,
   firstTagValue,
   formatBytes,
@@ -41,6 +44,9 @@ import {
 
 export default function App() {
   const [directory, setDirectory] = useState("");
+  const [directorySuggestions, setDirectorySuggestions] = useState<string[]>([]);
+  const [showDirectorySuggestions, setShowDirectorySuggestions] = useState(false);
+  const [directorySuggestionIndex, setDirectorySuggestionIndex] = useState(-1);
   const [keyword, setKeyword] = useState("");
   const [keywordCaseSensitive, setKeywordCaseSensitive] = useState(false);
   const [keywordUseRegex, setKeywordUseRegex] = useState(false);
@@ -57,6 +63,9 @@ export default function App() {
   const [dragAnchorIndex, setDragAnchorIndex] = useState<number | null>(null);
 
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const directorySuggestAbortRef = useRef<AbortController | null>(null);
+  const directorySuggestTimerRef = useRef<number | null>(null);
+  const directorySuggestContainerRef = useRef<HTMLDivElement | null>(null);
 
   const [operationType, setOperationType] = useState<OperationType>("swap_name_parts");
   const specialCharRowSeed = useRef(1);
@@ -93,6 +102,9 @@ export default function App() {
   const [metadataForm, setMetadataForm] = useState({ title: "", artist: "", album: "" });
   const [metadataRemoveFieldsInput, setMetadataRemoveFieldsInput] = useState("");
   const [showGlobalScrollActions, setShowGlobalScrollActions] = useState(false);
+  const [floatingPlayerFileName, setFloatingPlayerFileName] = useState<string | null>(null);
+  const [floatingPlayerSourceUrl, setFloatingPlayerSourceUrl] = useState<string | null>(null);
+  const [floatingPlayerAutoPlayToken, setFloatingPlayerAutoPlayToken] = useState(0);
 
   const keywordRegexError = useMemo(() => {
     const trimmed = keyword.trim();
@@ -210,6 +222,112 @@ export default function App() {
     }
     setActiveTask(null);
   };
+
+  const hideDirectorySuggestions = () => {
+    setShowDirectorySuggestions(false);
+    setDirectorySuggestionIndex(-1);
+  };
+
+  const applyDirectorySuggestion = (nextDirectory: string) => {
+    setDirectory(nextDirectory);
+    hideDirectorySuggestions();
+  };
+
+  const openFloatingPlayer = (fileName: string, sourceUrl: string) => {
+    setFloatingPlayerFileName(fileName);
+    setFloatingPlayerSourceUrl(sourceUrl);
+    setFloatingPlayerAutoPlayToken((previous) => previous + 1);
+  };
+
+  useEffect(() => {
+    const loadDefaultDirectory = async () => {
+      try {
+        const result = await fetch(`${API_BASE}/api/config`);
+        if (!result.ok) {
+          return;
+        }
+        const payload = (await result.json()) as RuntimeConfigResponse;
+        if (!payload.default_music_dir) {
+          return;
+        }
+
+        setDirectory((previous) => (previous.trim().length > 0 ? previous : payload.default_music_dir ?? ""));
+      } catch {
+        // Ignore config bootstrap failure and allow manual input.
+      }
+    };
+
+    void loadDefaultDirectory();
+  }, []);
+
+  useEffect(() => {
+    const trimmed = directory.trim();
+    if (!trimmed) {
+      setDirectorySuggestions([]);
+      hideDirectorySuggestions();
+      return;
+    }
+
+    if (directorySuggestTimerRef.current != null) {
+      window.clearTimeout(directorySuggestTimerRef.current);
+    }
+
+    directorySuggestTimerRef.current = window.setTimeout(() => {
+      directorySuggestAbortRef.current?.abort();
+      const controller = new AbortController();
+      directorySuggestAbortRef.current = controller;
+
+      void (async () => {
+        try {
+          const result = await fetch(buildDirectorySuggestUrl(trimmed), {
+            signal: controller.signal,
+          });
+
+          if (!result.ok) {
+            setDirectorySuggestions([]);
+            hideDirectorySuggestions();
+            return;
+          }
+
+          const payload = (await result.json()) as DirectorySuggestResponse;
+          setDirectorySuggestions(payload.candidates);
+          setDirectorySuggestionIndex(-1);
+          setShowDirectorySuggestions(payload.candidates.length > 0);
+        } catch (requestError) {
+          if (requestError instanceof DOMException && requestError.name === "AbortError") {
+            return;
+          }
+          setDirectorySuggestions([]);
+          hideDirectorySuggestions();
+        }
+      })();
+    }, 150);
+
+    return () => {
+      if (directorySuggestTimerRef.current != null) {
+        window.clearTimeout(directorySuggestTimerRef.current);
+      }
+      directorySuggestAbortRef.current?.abort();
+    };
+  }, [directory]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (directorySuggestContainerRef.current?.contains(target)) {
+        return;
+      }
+      hideDirectorySuggestions();
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, []);
 
   const runTask = async (
     title: string,
@@ -384,12 +502,62 @@ export default function App() {
     return mapping;
   };
 
+  const onDirectoryInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!showDirectorySuggestions || directorySuggestions.length === 0) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void runScan();
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setDirectorySuggestionIndex((previous) => {
+        const next = previous + 1;
+        if (next >= directorySuggestions.length) {
+          return 0;
+        }
+        return next;
+      });
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setDirectorySuggestionIndex((previous) => {
+        const next = previous - 1;
+        if (next < 0) {
+          return directorySuggestions.length - 1;
+        }
+        return next;
+      });
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideDirectorySuggestions();
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (directorySuggestionIndex >= 0 && directorySuggestionIndex < directorySuggestions.length) {
+        applyDirectorySuggestion(directorySuggestions[directorySuggestionIndex]);
+      } else {
+        void runScan();
+      }
+    }
+  };
+
   const runScan = async (
     directoryOverride?: string,
     options?: { resetPanels?: boolean }
   ) => {
     setLoading(true);
     setError(null);
+    hideDirectorySuggestions();
 
     try {
       const targetDirectory = (directoryOverride ?? directory).trim();
@@ -566,6 +734,17 @@ export default function App() {
       setFocusedFile(null);
     }
   }, [focusedFile, sortedFiles]);
+
+  useEffect(() => {
+    if (!floatingPlayerFileName || !response) {
+      return;
+    }
+    const stillExists = response.files.some((item) => item.file_name === floatingPlayerFileName);
+    if (!stillExists) {
+      setFloatingPlayerFileName(null);
+      setFloatingPlayerSourceUrl(null);
+    }
+  }, [floatingPlayerFileName, response]);
 
   useEffect(() => {
     const enforceSinglePlayingMedia = (event: Event) => {
@@ -1035,14 +1214,27 @@ export default function App() {
         </section>
 
         <section className="panel">
-          <div className="controls">
+          <div className="controls" ref={directorySuggestContainerRef}>
             <label htmlFor="directory">音乐目录</label>
             <input
               id="directory"
+              name="directory"
               type="text"
               placeholder="例如 /Users/you/Music"
               value={directory}
               onChange={(event) => setDirectory(event.target.value)}
+              onFocus={() => {
+                if (directorySuggestions.length > 0) {
+                  setShowDirectorySuggestions(true);
+                }
+              }}
+              onBlur={() => {
+                window.setTimeout(() => {
+                  hideDirectorySuggestions();
+                }, 100);
+              }}
+              onKeyDown={onDirectoryInputKeyDown}
+              autoComplete={directory.trim().length === 0 ? "on" : "off"}
             />
             <button onClick={() => runScan()} disabled={loading || taskRunning}
 				aria-label={loading ? '扫描中...' : '开始扫描'}
@@ -1050,6 +1242,25 @@ export default function App() {
             >
               <span className="iconfont icon-search-folder" aria-hidden="true" />
             </button>
+
+            {showDirectorySuggestions && directorySuggestions.length > 0 ? (
+              <ul className="directory-suggestions" role="listbox" aria-label="目录补全候选">
+                {directorySuggestions.map((item, index) => (
+                  <li key={item} role="option" aria-selected={directorySuggestionIndex === index}>
+                    <button
+                      type="button"
+                      className={`directory-suggestion-item${directorySuggestionIndex === index ? " is-active" : ""}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        applyDirectorySuggestion(item);
+                      }}
+                    >
+                      {item}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
 
           <div className="toolbar">
@@ -1249,7 +1460,30 @@ export default function App() {
                           }}
                         />
                       </td>
-                      <td>{file.file_name}</td>
+                      <td>
+                        <div className="file-name-cell">
+                          <span>{file.file_name}</span>
+                          <button
+                            type="button"
+                            className="row-play-btn icon-only-btn"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openFloatingPlayer(
+                                file.file_name,
+                                buildMediaPreviewUrl(effectiveDirectory, file.file_name)
+                              );
+                            }}
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                            }}
+                            disabled={taskRunning}
+                            aria-label={`播放 ${file.file_name}`}
+                            title="播放"
+                          >
+                            <span className="iconfont icon-play" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
                       <td>{file.format || "-"}</td>
                       <td>{formatBytes(file.size_bytes)}</td>
                       <td>{new Date(file.modified_at).toLocaleString()}</td>
@@ -1621,6 +1855,33 @@ export default function App() {
           ) : null}
         </section>
       </main>
+
+      {floatingPlayerSourceUrl && floatingPlayerFileName ? (
+        <div className="floating-audio-dock" aria-label="全局播放器">
+          <div className="floating-audio-head">
+            <p className="floating-audio-title" title={floatingPlayerFileName}>{floatingPlayerFileName}</p>
+            <button
+              type="button"
+              className="icon-only-btn floating-audio-close"
+              onClick={() => {
+                setFloatingPlayerFileName(null);
+                setFloatingPlayerSourceUrl(null);
+              }}
+              aria-label="关闭全局播放器"
+              title="关闭"
+            >
+              <span className="iconfont icon-close" aria-hidden="true" />
+            </button>
+          </div>
+
+          <InlineAudioPreview
+            playerId="global-floating-player"
+            sourceUrl={floatingPlayerSourceUrl}
+            autoPlayToken={floatingPlayerAutoPlayToken}
+            className="floating-audio-inline"
+          />
+        </div>
+      ) : null}
 
       {showGlobalScrollActions ? (
         <div className="global-scroll-actions" aria-label="页面滚动快捷操作">

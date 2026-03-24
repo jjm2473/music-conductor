@@ -5,7 +5,7 @@ Music Conductor is a local-first music file manager with a browser UI and backen
 - Backend: FastAPI + Mutagen
 - Frontend: React + TypeScript + Vite
 
-Note: use python venv in `backend/.venv`, don't create venv on root.
+Note: use python venv in `backend/.venv`, don't create venv on repository root.
 
 ## Project Structure
 
@@ -75,6 +75,8 @@ pip install -r requirements.txt
 python -m app.main --host 127.0.0.1 --port 8000
 ```
 
+If `frontend/dist` exists, backend serves frontend static files directly.
+
 Useful env vars:
 
 - `MC_CONFIG_FILE`: custom config file path
@@ -100,6 +102,20 @@ npm run dev
 Optional frontend env:
 
 - `VITE_API_BASE` (default: `http://127.0.0.1:8000`)
+
+For production-like local run (single service, no extra frontend web server):
+
+```bash
+cd frontend
+npm install
+npm run build
+
+cd ../backend
+source .venv/bin/activate
+python -m app.main --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000`.
 
 ### 3) Backend Tests
 
@@ -133,6 +149,7 @@ Implemented endpoints (summary):
 
 - `GET /api/health`
 - `GET /api/config`
+- `GET /api/directories/suggest`
 - `GET /api/media/preview`
 - `POST /api/scan`
 - `POST /api/metadata/read`
@@ -161,9 +178,37 @@ Operation values currently supported:
 
 - For scan/operations/duplicates, prefer task endpoints (`/api/tasks/*/start`) plus status polling and SSE events.
 - Keep synchronous endpoints as fallback for script use or quick debugging.
+- Scan directory input should initialize from `/api/config.default_music_dir` when available.
+- Use `/api/directories/suggest` for path autocomplete; when input ends with `/`, server returns direct child directory candidates.
 - Frontend type contracts should be aligned with:
   - `backend/app/models.py`
   - `frontend/src/types.ts`
+
+## Docker
+
+Build multi-platform image (linux/amd64 + linux/arm64):
+
+```bash
+cd /path/to/music-conductor
+docker buildx build \
+	--platform linux/amd64,linux/arm64 \
+	-t music-conductor:latest \
+	.
+```
+
+Run container and mount your music directory:
+
+```bash
+docker run --rm -p 8000:8000 \
+	-e MC_MUSIC_DIR=/music \
+	-v /absolute/path/to/your/music:/music \
+	music-conductor:latest
+```
+
+Notes:
+
+- Dockerfile uses multi-stage build: frontend build runs in Node stage; final runtime image contains only Python runtime + backend + frontend dist.
+- Backend serves frontend static files directly from `/app/frontend/dist`.
 
 ## Smoke Test Notes
 
